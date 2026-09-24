@@ -73,6 +73,19 @@ local function simulatePhysics()
 				local ao = part:FindFirstChildOfClass("AlignOrientation")
 				local rot = if ao and ao.CFrame then ao.CFrame - ao.CFrame.Position else part.CFrame - part.CFrame.Position
 				part.CFrame = roblox.CFrame.new(ap.Position) * rot
+				-- WeldConstraints lock their offset when first active in Workspace (like real Roblox),
+				-- then welded parts follow the root.
+				local model = part.Parent
+				for _, d in model:GetDescendants() do
+					if rawget(d, "__class") == "WeldConstraint" and d.Part0 == part and d.Part1 then
+						local offset = rawget(d, "__offset")
+						if not offset then
+							offset = (rawget(d, "__spawnRoot") or part.CFrame):Inverse() * d.Part1.CFrame
+							rawset(d, "__offset", offset)
+						end
+						d.Part1.CFrame = part.CFrame * offset
+					end
+				end
 			end
 		end
 	end
@@ -584,6 +597,13 @@ local function setParent(self, newParent)
 		local desc = rawget(newParent, "__descAdded")
 		if desc then
 			desc(self)
+		end
+		if M.workspace and (newParent == M.workspace or newParent:IsDescendantOf(M.workspace)) then
+			for _, d in self:GetDescendants() do
+				if rawget(d, "__class") == "WeldConstraint" and d.Part0 and not rawget(d, "__spawnRoot") then
+					rawset(d, "__spawnRoot", d.Part0.CFrame)
+				end
+			end
 		end
 	end
 end

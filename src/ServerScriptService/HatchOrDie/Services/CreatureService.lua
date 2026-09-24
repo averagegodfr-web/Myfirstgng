@@ -191,7 +191,8 @@ local function spawnFor(player: Player, keepHealthRatio: number?)
 
 	local rootPart = ownerRoot(player)
 	local base = if rootPart then rootPart.Position + Vector3.new(4, 0, 4) else Registry.EnemyService.GetCampPosition()
-	root.CFrame = CFrame.new(base.X, GameConfig.GroundY + hip, base.Z)
+	-- Move the WHOLE model (not just Root): welds lock their offsets when the model enters Workspace.
+	model:PivotTo(CFrame.new(base.X, GameConfig.GroundY + hip, base.Z))
 	local mover = Mover.Attach(model, GameConfig.CreatureResponsiveness)
 
 	local state = {

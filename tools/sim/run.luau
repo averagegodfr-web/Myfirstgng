@@ -219,6 +219,8 @@ do
 	local plate = petModel:FindFirstChild("Nameplate")
 	check(plate and plate.AlwaysOnTop and plate.Adornee and plate.Adornee.Name == "NameplateAttachment", "nameplate sits on an attachment above the model and draws on top")
 	check(petRoot.Anchored == false and petRoot:FindFirstChildOfClass("AlignPosition") ~= nil, "pet moves with physics movers (smooth replication)")
+	local body = petModel:FindFirstChild("Body")
+	check(body and (body.Position - petRoot.Position).Magnitude < 3, ("pet body stays with its root/nameplate (%.1f studs apart)"):format(if body then (body.Position - petRoot.Position).Magnitude else -1))
 	hrp.CFrame = roblox.CFrame.new(0, 3, 16)
 	sim.run(3)
 end
@@ -265,6 +267,16 @@ sim.run(45)
 check(RS.HatchOrDie:GetAttribute("Phase") == "Night", "night falls after the day timer")
 swingFor(20)
 check(#sim.workspace.Enemies:GetChildren() > 0 or profile.Stats.Kills > 0, "enemies spawned at night")
+do
+	local worst = 0
+	for _, m in sim.workspace.Enemies:GetChildren() do
+		local body = m:FindFirstChild("Body")
+		if body and m.PrimaryPart then
+			worst = math.max(worst, (body.Position - m.PrimaryPart.Position).Magnitude)
+		end
+	end
+	check(worst < 3, ("enemy bodies stay with their root/health bar (worst %.1f studs)"):format(worst))
+end
 for _ = 1, 300 do
 	if RS.HatchOrDie:GetAttribute("Phase") == "Day" and RS.HatchOrDie:GetAttribute("Night") == 2 then
 		break

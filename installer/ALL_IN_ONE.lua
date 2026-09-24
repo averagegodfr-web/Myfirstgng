@@ -3204,7 +3204,8 @@ local function spawnFor(player: Player, keepHealthRatio: number?)
 
 	local rootPart = ownerRoot(player)
 	local base = if rootPart then rootPart.Position + Vector3.new(4, 0, 4) else Registry.EnemyService.GetCampPosition()
-	root.CFrame = CFrame.new(base.X, GameConfig.GroundY + hip, base.Z)
+	-- Move the WHOLE model (not just Root): welds lock their offsets when the model enters Workspace.
+	model:PivotTo(CFrame.new(base.X, GameConfig.GroundY + hip, base.Z))
 	local mover = Mover.Attach(model, GameConfig.CreatureResponsiveness)
 
 	local state = {
@@ -4915,7 +4916,8 @@ function EnemyService.Spawn(typeId: string, variantId: string?, position: Vector
 	local root = model.PrimaryPart :: BasePart
 	local hip = model:GetAttribute("HipHeight") :: number
 	local top = model:GetAttribute("Top") :: number
-	root.CFrame = CFrame.new(position.X, GameConfig.GroundY + hip, position.Z)
+	-- Move the WHOLE model (not just Root): welds lock their offsets when the model enters Workspace.
+	model:PivotTo(CFrame.new(position.X, GameConfig.GroundY + hip, position.Z))
 	local mover = Mover.Attach(model, GameConfig.EnemyResponsiveness)
 
 	local e = {
@@ -5555,7 +5557,7 @@ local function spawnWorldEgg(spot: BasePart, eggId: string, area: string)
 	local model = Models.BuildEgg(eggId)
 	local root = model.PrimaryPart :: BasePart
 	local base = CFrame.new(spot.Position.X, spot.Position.Y + 1.6, spot.Position.Z)
-	root.CFrame = base
+	model:PivotTo(base)
 	model.Parent = worldEggs
 	TweenService:Create(root, TweenInfo.new(1.4, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true), {
 		CFrame = base * CFrame.new(0, 0.6, 0) * CFrame.Angles(0, math.rad(90), 0),

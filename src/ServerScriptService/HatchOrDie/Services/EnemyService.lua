@@ -147,7 +147,8 @@ function EnemyService.Spawn(typeId: string, variantId: string?, position: Vector
 	local root = model.PrimaryPart :: BasePart
 	local hip = model:GetAttribute("HipHeight") :: number
 	local top = model:GetAttribute("Top") :: number
-	root.CFrame = CFrame.new(position.X, GameConfig.GroundY + hip, position.Z)
+	-- Move the WHOLE model (not just Root): welds lock their offsets when the model enters Workspace.
+	model:PivotTo(CFrame.new(position.X, GameConfig.GroundY + hip, position.Z))
 	local mover = Mover.Attach(model, GameConfig.EnemyResponsiveness)
 
 	local e = {

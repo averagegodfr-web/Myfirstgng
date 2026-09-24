@@ -123,7 +123,7 @@ local function spawnWorldEgg(spot: BasePart, eggId: string, area: string)
 	local model = Models.BuildEgg(eggId)
 	local root = model.PrimaryPart :: BasePart
 	local base = CFrame.new(spot.Position.X, spot.Position.Y + 1.6, spot.Position.Z)
-	root.CFrame = base
+	model:PivotTo(base)
 	model.Parent = worldEggs
 	TweenService:Create(root, TweenInfo.new(1.4, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true), {
 		CFrame = base * CFrame.new(0, 0.6, 0) * CFrame.Angles(0, math.rad(90), 0),
