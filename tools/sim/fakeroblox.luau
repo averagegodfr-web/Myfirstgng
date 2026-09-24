@@ -213,7 +213,7 @@ local function isValidProperty(className, prop)
 	return ok
 end
 M.invalidProperties = {}
-local HARNESS_KEYS = { LocalPlayer = true, CurrentCamera = true, PlaceId = true, JobId = true, Character = true, UserId = true, DisplayName = true, ProcessReceipt = true, OnIncomingMessage = true }
+local HARNESS_KEYS = { ViewportSize = true, LocalPlayer = true, CurrentCamera = true, PlaceId = true, JobId = true, Character = true, UserId = true, DisplayName = true, ProcessReceipt = true, OnIncomingMessage = true }
 
 local Instance = {}
 local instanceMeta = {}
@@ -657,6 +657,7 @@ function methods:FillBlock() end
 function methods:Clear() end
 M.workspace = workspace
 workspace.CurrentCamera = Instance.new("Camera", workspace)
+workspace.CurrentCamera.ViewportSize = roblox.Vector2.new(1280, 720)
 
 local Players = service("Players")
 Players.CharacterAutoLoads = true

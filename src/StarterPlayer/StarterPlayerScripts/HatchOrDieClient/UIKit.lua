@@ -114,7 +114,7 @@ function UIKit.button(props: { [string]: any }, onClick: (() -> ())?): TextButto
 	local button = UIKit.new("TextButton", defaults)
 	UIKit.corner(button, 10)
 	UIKit.stroke(button, Color3.new(0, 0, 0), 2, 0.4)
-	UIKit.new("UITextSizeConstraint", { MaxTextSize = 28, Parent = button })
+	UIKit.new("UITextSizeConstraint", { MaxTextSize = 44, Parent = button })
 	UIKit.decorate(button)
 	if onClick then
 		button.Activated:Connect(onClick)

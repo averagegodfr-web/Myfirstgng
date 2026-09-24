@@ -56,6 +56,7 @@ local function bind(gui: ScreenGui)
 	for _, name in { "Announcement", "BigTitle", "NightResult" } do
 		baseSizes[name] = refs[name].Size
 	end
+	ctx.Layout.MakeResponsive(gui)
 
 	-- Behavior
 	local function onClick(button, fn)
@@ -110,9 +111,8 @@ function Hud.Toast(text: string, color: Color3?)
 		label = toast:FindFirstChild("Label", true) or toast
 		toast.Parent = refs.Toasts
 	else
-		toast = UIKit.panel({ Size = UDim2.fromOffset(320, 38), BackgroundColor3 = C.Bg, Parent = refs.Toasts })
-		label = UIKit.text({ Position = UDim2.fromOffset(8, 3), Size = UDim2.new(1, -16, 1, -6), TextXAlignment = Enum.TextXAlignment.Left, Parent = toast })
-		UIKit.new("UITextSizeConstraint", { MaxTextSize = 18, Parent = label })
+		toast = UIKit.panel({ Size = UDim2.fromScale(1, 0.19), BackgroundColor3 = C.Bg, Parent = refs.Toasts })
+		label = UIKit.text({ Position = UDim2.fromScale(0.03, 0.12), Size = UDim2.fromScale(0.94, 0.76), TextXAlignment = Enum.TextXAlignment.Left, Parent = toast })
 	end
 	if label:IsA("TextLabel") or label:IsA("TextButton") then
 		label.Text = text
@@ -126,7 +126,7 @@ function Hud.Toast(text: string, color: Color3?)
 			table.insert(frames, child)
 		end
 	end
-	if #frames > 5 then
+	if #frames > 4 then
 		frames[1]:Destroy()
 	end
 	task.delay(4.5, function()

@@ -69,13 +69,14 @@ local function overlay()
 	local rays = UIKit.new("Frame", {
 		AnchorPoint = Vector2.new(0.5, 0.5),
 		Position = UDim2.fromScale(0.5, 0.45),
-		Size = UDim2.fromOffset(700, 700),
+		Size = UDim2.fromScale(0.97, 0.97),
+		SizeConstraint = Enum.SizeConstraint.RelativeYY,
 		BackgroundColor3 = Color3.new(1, 1, 1),
 		BackgroundTransparency = 1,
 		BorderSizePixel = 0,
 		Parent = root,
 	})
-	UIKit.corner(rays, 350)
+	UIKit.new("UICorner", { CornerRadius = UDim.new(1, 0), Parent = rays })
 	local gradient = UIKit.new("UIGradient", {
 		Transparency = NumberSequence.new({
 			NumberSequenceKeypoint.new(0, 0.3),
@@ -88,30 +89,31 @@ local function overlay()
 	local vp = UIKit.viewport({
 		AnchorPoint = Vector2.new(0.5, 0.5),
 		Position = UDim2.fromScale(0.5, 0.42),
-		Size = UDim2.fromOffset(340, 340),
+		Size = UDim2.fromScale(0.47, 0.47),
+		SizeConstraint = Enum.SizeConstraint.RelativeYY,
 		Parent = root,
 	}, nil, false)
 
 	local title = UIKit.text({
 		AnchorPoint = Vector2.new(0.5, 0),
-		Position = UDim2.new(0.5, 0, 0.42, 175),
-		Size = UDim2.new(0.8, 0, 0, 56),
+		Position = UDim2.fromScale(0.5, 0.665),
+		Size = UDim2.fromScale(0.8, 0.078),
 		Font = Enum.Font.FredokaOne,
 		TextStrokeTransparency = 0,
 		Parent = root,
 	})
 	local sub = UIKit.text({
 		AnchorPoint = Vector2.new(0.5, 0),
-		Position = UDim2.new(0.5, 0, 0.42, 232),
-		Size = UDim2.new(0.7, 0, 0, 30),
+		Position = UDim2.fromScale(0.5, 0.745),
+		Size = UDim2.fromScale(0.7, 0.042),
 		Font = Enum.Font.FredokaOne,
 		TextColor3 = C.SubText,
 		Parent = root,
 	})
 	local tag = UIKit.text({
 		AnchorPoint = Vector2.new(0.5, 1),
-		Position = UDim2.new(0.5, 0, 0.42, -170),
-		Size = UDim2.new(0.6, 0, 0, 36),
+		Position = UDim2.fromScale(0.5, 0.18),
+		Size = UDim2.fromScale(0.6, 0.05),
 		Font = Enum.Font.FredokaOne,
 		TextColor3 = C.Gold,
 		Parent = root,
@@ -153,8 +155,9 @@ local function waitForDismiss(o, seconds: number)
 	local done = false
 	local button = UIKit.button({
 		AnchorPoint = Vector2.new(0.5, 1),
-		Position = UDim2.new(0.5, 0, 1, -30),
-		Size = UDim2.fromOffset(220, 48),
+		Position = UDim2.fromScale(0.5, 0.95),
+		Size = UDim2.fromScale(0.3, 0.067),
+		SizeConstraint = Enum.SizeConstraint.RelativeYY,
 		BackgroundColor3 = Color3.fromRGB(70, 170, 90),
 		Text = "AWESOME!",
 		Parent = o.Root,
@@ -239,8 +242,8 @@ local function playHatch(result)
 
 	o.Title.Text = ctx.CreatureData.GetDisplayName(record)
 	o.Title.TextColor3 = color
-	o.Title.Size = UDim2.new(0.8, 0, 0, 90)
-	UIKit.tween(o.Title, 0.4, { Size = UDim2.new(0.8, 0, 0, 56) }, Enum.EasingStyle.Back)
+	o.Title.Size = UDim2.fromScale(0.8, 0.125)
+	UIKit.tween(o.Title, 0.4, { Size = UDim2.fromScale(0.8, 0.078) }, Enum.EasingStyle.Back)
 	o.Sub.Text = rarity:upper() .. (if mutationText ~= "" then "  •  " .. mutationText else "")
 	o.Sub.TextColor3 = color
 	o.Tag.Text = if result.IsNew then "🆕 NEW DISCOVERY!" else ""
@@ -317,6 +320,7 @@ function Cinematics.Init(context)
 		Name = "HatchOrDieCinematics",
 		ResetOnSpawn = false,
 		IgnoreGuiInset = true,
+		ScreenInsets = Enum.ScreenInsets.DeviceSafeInsets,
 		DisplayOrder = 10,
 		Parent = player:WaitForChild("PlayerGui"),
 	})

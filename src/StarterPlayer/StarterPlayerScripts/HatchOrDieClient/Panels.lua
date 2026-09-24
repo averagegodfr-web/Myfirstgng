@@ -40,6 +40,30 @@ local function scrolling(props): ScrollingFrame
 	return UIKit.new("ScrollingFrame", defaults)
 end
 
+-- Menus are sized from the window's real pixel size so cards fit phones, tablets and PCs.
+local function contentSize(): Vector2
+	local abs = content.AbsoluteSize
+	if abs and abs.X > 50 and abs.Y > 50 then
+		return abs
+	end
+	local camera = workspace.CurrentCamera
+	local viewport = if camera then camera.ViewportSize else Vector2.new(1280, 720)
+	return Vector2.new(math.min(viewport.X * 0.85, 1050), math.min(viewport.Y * 0.68, 620))
+end
+
+-- Grid whose columns adapt to the available width. heightRatio = cell height / cell width.
+local function grid(list: Instance, width: number, minCellWidth: number, heightRatio: number, sortOrder: Enum.SortOrder?)
+	local pad = math.max(4, math.floor(width * 0.012))
+	local columns = math.max(1, math.floor((width + pad) / (minCellWidth + pad)))
+	local cellWidth = math.floor((width - 10 - pad * (columns - 1)) / columns)
+	return UIKit.new("UIGridLayout", {
+		CellSize = UDim2.fromOffset(cellWidth, math.floor(cellWidth * heightRatio)),
+		CellPadding = UDim2.fromOffset(pad, pad),
+		SortOrder = sortOrder or Enum.SortOrder.LayoutOrder,
+		Parent = list,
+	})
+end
+
 local function oddsText(egg): string
 	local total = 0
 	for _, entry in egg.Pool do
@@ -70,7 +94,8 @@ local function renderEggs()
 	local profile = ctx.Profile
 	titleLabel.Text = ("🥚 EGGS (%d/%d)"):format(#profile.Eggs, ctx.GameConfig.MaxEggs)
 
-	local status = UIKit.text({ Size = UDim2.new(1, 0, 0, 24), TextColor3 = C.SubText, Parent = content })
+	local size = contentSize()
+	local status = UIKit.text({ Size = UDim2.fromScale(1, 0.07), TextColor3 = C.SubText, Parent = content })
 	if profile.Incubator then
 		local egg = ctx.EggData[profile.Incubator.EggId]
 		status.Text = ("Incubating: %s - watch the timer above the menu"):format(if egg then egg.Name else "Egg")
@@ -79,8 +104,8 @@ local function renderEggs()
 		status.Text = "Your incubator is empty - pick an egg to hatch!"
 	end
 
-	local list = scrolling({ Position = UDim2.fromOffset(0, 30), Size = UDim2.new(1, 0, 1, -30), Parent = content })
-	UIKit.new("UIGridLayout", { CellSize = UDim2.fromOffset(200, 250), CellPadding = UDim2.fromOffset(10, 10), Parent = list })
+	local list = scrolling({ Position = UDim2.fromScale(0, 0.08), Size = UDim2.fromScale(1, 0.92), Parent = content })
+	grid(list, size.X, 170, 1.3)
 
 	local counts = {}
 	local firstOf = {}
@@ -94,14 +119,14 @@ local function renderEggs()
 		local count = counts[eggId] or 0
 		local card = UIKit.panel({ BackgroundColor3 = C.PanelLight, Parent = list })
 		UIKit.padding(card, 8)
-		UIKit.viewport({ Size = UDim2.new(1, 0, 0, 80), Parent = card }, ctx.Models.BuildEgg(eggId), true)
-		UIKit.text({ Position = UDim2.fromOffset(0, 82), Size = UDim2.new(1, 0, 0, 22), Text = egg.Name, Font = Enum.Font.FredokaOne, TextColor3 = ctx.Rarity.Colors[egg.Rarity], Parent = card })
-		UIKit.text({ Position = UDim2.fromOffset(0, 104), Size = UDim2.new(1, 0, 0, 16), Text = ("%s • %ds • Owned x%d"):format(egg.Rarity, egg.HatchTime, count), TextColor3 = C.SubText, Parent = card })
-		UIKit.text({ Position = UDim2.fromOffset(0, 122), Size = UDim2.new(1, 0, 0, 52), Text = oddsText(egg), TextColor3 = C.Text, Font = Enum.Font.Gotham, Parent = card })
+		UIKit.viewport({ Size = UDim2.fromScale(1, 0.3), Parent = card }, ctx.Models.BuildEgg(eggId), true)
+		UIKit.text({ Position = UDim2.fromScale(0, 0.31), Size = UDim2.fromScale(1, 0.1), Text = egg.Name, Font = Enum.Font.FredokaOne, TextColor3 = ctx.Rarity.Colors[egg.Rarity], Parent = card })
+		UIKit.text({ Position = UDim2.fromScale(0, 0.42), Size = UDim2.fromScale(1, 0.07), Text = ("%s • %ds • Owned x%d"):format(egg.Rarity, egg.HatchTime, count), TextColor3 = C.SubText, Parent = card })
+		UIKit.text({ Position = UDim2.fromScale(0, 0.51), Size = UDim2.fromScale(1, 0.28), Text = oddsText(egg), TextColor3 = C.Text, Font = Enum.Font.Gotham, Parent = card })
 		if count > 0 then
 			UIKit.button({
-				Position = UDim2.new(0, 0, 1, -40),
-				Size = UDim2.new(1, 0, 0, 40),
+				Position = UDim2.fromScale(0, 0.82),
+				Size = UDim2.fromScale(1, 0.18),
 				BackgroundColor3 = if profile.Incubator then C.PanelLight else Color3.fromRGB(70, 170, 90),
 				Text = if profile.Incubator then "Incubator busy" else "HATCH",
 				Parent = card,
@@ -110,8 +135,8 @@ local function renderEggs()
 			end)
 		else
 			UIKit.button({
-				Position = UDim2.new(0, 0, 1, -40),
-				Size = UDim2.new(1, 0, 0, 40),
+				Position = UDim2.fromScale(0, 0.82),
+				Size = UDim2.fromScale(1, 0.18),
 				Text = ("Buy - 🪙 %d"):format(egg.Price),
 				Parent = card,
 			}, function()
@@ -153,18 +178,18 @@ local function renderCreatureDetail(parent: Frame, record)
 	local family = CD.Families[record.Family]
 	local stage = CD.Stages[record.Stage]
 
-	UIKit.viewport({ Size = UDim2.new(1, 0, 0, 150), Parent = parent }, ctx.Models.BuildCreature(record), true)
-	UIKit.text({ Position = UDim2.fromOffset(0, 152), Size = UDim2.new(1, 0, 0, 26), Text = CD.GetDisplayName(record), Font = Enum.Font.FredokaOne, TextColor3 = ctx.Rarity.Colors[rarity], Parent = parent })
+	UIKit.viewport({ Size = UDim2.fromScale(1, 0.4), Parent = parent }, ctx.Models.BuildCreature(record), true)
+	UIKit.text({ Position = UDim2.fromScale(0, 0.41), Size = UDim2.fromScale(1, 0.075), Text = CD.GetDisplayName(record), Font = Enum.Font.FredokaOne, TextColor3 = ctx.Rarity.Colors[rarity], Parent = parent })
 	UIKit.text({
-		Position = UDim2.fromOffset(0, 178),
-		Size = UDim2.new(1, 0, 0, 16),
+		Position = UDim2.fromScale(0, 0.49),
+		Size = UDim2.fromScale(1, 0.045),
 		Text = ("%s • %s • %s"):format(rarity, stage.Name, if record.Mutation then "🧬 " .. record.Mutation else "No mutation"),
 		TextColor3 = C.SubText,
 		Parent = parent,
 	})
 	UIKit.text({
-		Position = UDim2.fromOffset(0, 196),
-		Size = UDim2.new(1, 0, 0, 34),
+		Position = UDim2.fromScale(0, 0.54),
+		Size = UDim2.fromScale(1, 0.09),
 		Text = ("❤️ %d  ⚔️ %.1f  🎯 %.0f\n✨ %s"):format(stats.MaxHealth, stats.Damage, stats.Range, family.Ability.Name),
 		Font = Enum.Font.Gotham,
 		Parent = parent,
@@ -181,9 +206,9 @@ local function renderCreatureDetail(parent: Frame, record)
 	else
 		nextText = ("Fully evolved • %d nights survived"):format(record.Nights)
 	end
-	UIKit.text({ Position = UDim2.fromOffset(0, 232), Size = UDim2.new(1, 0, 0, 16), Text = nextText, TextColor3 = C.Accent, Parent = parent })
+	UIKit.text({ Position = UDim2.fromScale(0, 0.64), Size = UDim2.fromScale(1, 0.045), Text = nextText, TextColor3 = C.Accent, Parent = parent })
 
-	local buttons = UIKit.new("Frame", { Position = UDim2.fromOffset(0, 254), Size = UDim2.new(1, 0, 0, 34), BackgroundTransparency = 1, Parent = parent })
+	local buttons = UIKit.new("Frame", { Position = UDim2.fromScale(0, 0.7), Size = UDim2.fromScale(1, 0.1), BackgroundTransparency = 1, Parent = parent })
 	UIKit.new("UIListLayout", { FillDirection = Enum.FillDirection.Horizontal, Padding = UDim.new(0, 4), Parent = buttons })
 	local equipped = profile.Equipped == record.Id
 	UIKit.button({ Size = UDim2.new(0.25, -3, 1, 0), BackgroundColor3 = if equipped then C.PanelLight else Color3.fromRGB(70, 140, 255), Text = if equipped then "Equipped" else "Equip", Parent = buttons }, function()
@@ -201,15 +226,15 @@ local function renderCreatureDetail(parent: Frame, record)
 	end)
 
 	if equipped then
-		local auras = UIKit.new("Frame", { Position = UDim2.fromOffset(0, 294), Size = UDim2.new(1, 0, 0, 28), BackgroundTransparency = 1, Parent = parent })
-		UIKit.new("UIListLayout", { FillDirection = Enum.FillDirection.Horizontal, Padding = UDim.new(0, 4), Parent = auras })
-		UIKit.button({ Size = UDim2.fromOffset(60, 28), Text = "No aura", Parent = auras }, function()
+		local auras = UIKit.new("Frame", { Position = UDim2.fromScale(0, 0.82), Size = UDim2.fromScale(1, 0.18), BackgroundTransparency = 1, Parent = parent })
+		UIKit.new("UIGridLayout", { CellSize = UDim2.fromScale(0.235, 0.45), CellPadding = UDim2.fromScale(0.02, 0.08), Parent = auras })
+		UIKit.button({ Text = "No aura", Parent = auras }, function()
 			ctx.Net.Get("EquipAura"):FireServer("")
 		end)
 		for auraId, aura in ctx.CreatureData.Auras do
 			local owned = profile.Auras[auraId] or (auraId == "Golden" and player:GetAttribute("Pass_VIP"))
 			if owned then
-				UIKit.button({ Size = UDim2.fromOffset(80, 28), BackgroundColor3 = aura.Color:Lerp(Color3.new(0, 0, 0), 0.4), Text = aura.Name:gsub(" Aura", ""), Parent = auras }, function()
+				UIKit.button({ BackgroundColor3 = aura.Color:Lerp(Color3.new(0, 0, 0), 0.4), Text = aura.Name:gsub(" Aura", ""), Parent = auras }, function()
 					ctx.Net.Get("EquipAura"):FireServer(auraId)
 				end)
 			end
@@ -227,7 +252,7 @@ local function renderCreatures()
 	titleLabel.Text = ("🐲 CREATURES (%d/%d) • Discovered %d/%d"):format(#profile.Creatures, ctx.SlotLimit(), discovered, totalDiscoverable())
 
 	if #profile.Creatures == 0 then
-		UIKit.text({ Size = UDim2.new(1, 0, 0, 40), Text = "No creatures yet - hatch an egg!", Parent = content })
+		UIKit.text({ Size = UDim2.fromScale(1, 0.1), Text = "No creatures yet - hatch an egg!", Parent = content })
 		return
 	end
 	if not findCreature(selectedCreature) then
@@ -235,7 +260,7 @@ local function renderCreatures()
 	end
 
 	local list = scrolling({ Size = UDim2.new(0.5, -6, 1, 0), Parent = content })
-	UIKit.new("UIGridLayout", { CellSize = UDim2.fromOffset(100, 74), CellPadding = UDim2.fromOffset(6, 6), SortOrder = Enum.SortOrder.LayoutOrder, Parent = list })
+	grid(list, contentSize().X * 0.5 - 6, 95, 0.75)
 
 	local sorted = table.clone(profile.Creatures)
 	table.sort(sorted, function(a, b)
@@ -262,10 +287,10 @@ local function renderCreatures()
 			Panels.Render(true)
 		end)
 		card:FindFirstChildOfClass("UIStroke").Color = ctx.Rarity.Colors[rarity]
-		UIKit.text({ Size = UDim2.new(1, 0, 0, 30), Text = UIKit.FamilyIcons[record.Family] .. (if record.Mutation then "🧬" else ""), Parent = card })
-		UIKit.text({ Position = UDim2.fromOffset(2, 30), Size = UDim2.new(1, -4, 0, 24), Text = CD.GetDisplayName(record), TextColor3 = ctx.Rarity.Colors[rarity], Parent = card })
+		UIKit.text({ Size = UDim2.fromScale(1, 0.4), Text = UIKit.FamilyIcons[record.Family] .. (if record.Mutation then "🧬" else ""), Parent = card })
+		UIKit.text({ Position = UDim2.fromScale(0.03, 0.4), Size = UDim2.fromScale(0.94, 0.32), Text = CD.GetDisplayName(record), TextColor3 = ctx.Rarity.Colors[rarity], Parent = card })
 		local tags = (if record.Id == profile.Equipped then "⭐ " else "") .. (if record.Locked then "🔒 " else "") .. CD.Stages[record.Stage].Name
-		UIKit.text({ Position = UDim2.fromOffset(2, 54), Size = UDim2.new(1, -4, 0, 16), Text = tags, TextColor3 = C.SubText, Parent = card })
+		UIKit.text({ Position = UDim2.fromScale(0.03, 0.72), Size = UDim2.fromScale(0.94, 0.22), Text = tags, TextColor3 = C.SubText, Parent = card })
 	end
 
 	local detail = UIKit.new("Frame", { Position = UDim2.new(0.5, 6, 0, 0), Size = UDim2.new(0.5, -6, 1, 0), BackgroundTransparency = 1, Parent = content })
@@ -279,13 +304,14 @@ end
 -- Shop
 ---------------------------------------------------------------------------------------------------
 local function shopRow(parent: Instance, name: string, description: string, priceText: string, buttonText: string, enabled: boolean, onBuy: () -> ())
-	local row = UIKit.panel({ Size = UDim2.new(1, -8, 0, 64), BackgroundColor3 = C.PanelLight, Parent = parent })
-	UIKit.text({ Position = UDim2.fromOffset(10, 6), Size = UDim2.new(0.62, -10, 0, 24), Text = name, Font = Enum.Font.FredokaOne, TextXAlignment = Enum.TextXAlignment.Left, Parent = row })
-	UIKit.text({ Position = UDim2.fromOffset(10, 32), Size = UDim2.new(0.62, -10, 0, 26), Text = description, TextColor3 = C.SubText, Font = Enum.Font.Gotham, TextXAlignment = Enum.TextXAlignment.Left, Parent = row })
+	local rowHeight = math.clamp(math.floor(contentSize().Y * 0.16), 48, 110)
+	local row = UIKit.panel({ Size = UDim2.new(1, -8, 0, rowHeight), BackgroundColor3 = C.PanelLight, Parent = parent })
+	UIKit.text({ Position = UDim2.fromScale(0.02, 0.08), Size = UDim2.fromScale(0.6, 0.38), Text = name, Font = Enum.Font.FredokaOne, TextXAlignment = Enum.TextXAlignment.Left, Parent = row })
+	UIKit.text({ Position = UDim2.fromScale(0.02, 0.5), Size = UDim2.fromScale(0.6, 0.42), Text = description, TextColor3 = C.SubText, Font = Enum.Font.Gotham, TextXAlignment = Enum.TextXAlignment.Left, Parent = row })
 	UIKit.button({
 		AnchorPoint = Vector2.new(1, 0.5),
 		Position = UDim2.new(1, -10, 0.5, 0),
-		Size = UDim2.new(0.34, 0, 0, 44),
+		Size = UDim2.fromScale(0.34, 0.7),
 		BackgroundColor3 = if enabled then Color3.fromRGB(70, 170, 90) else C.Panel,
 		TextColor3 = if enabled then C.Text else C.SubText,
 		Text = if buttonText ~= "" then buttonText else priceText,
@@ -301,7 +327,7 @@ local function renderShop()
 	local profile = ctx.Profile
 	titleLabel.Text = ("🛒 SHOP • 🪙 %s"):format(UIKit.formatNumber(profile.Coins))
 
-	local tabs = UIKit.new("Frame", { Size = UDim2.new(1, 0, 0, 34), BackgroundTransparency = 1, Parent = content })
+	local tabs = UIKit.new("Frame", { Size = UDim2.fromScale(1, 0.085), BackgroundTransparency = 1, Parent = content })
 	UIKit.new("UIListLayout", { FillDirection = Enum.FillDirection.Horizontal, Padding = UDim.new(0, 6), Parent = tabs })
 	for _, category in ctx.ShopData.Categories do
 		UIKit.button({
@@ -315,7 +341,7 @@ local function renderShop()
 		end)
 	end
 
-	local list = scrolling({ Position = UDim2.fromOffset(0, 42), Size = UDim2.new(1, 0, 1, -42), Parent = content })
+	local list = scrolling({ Position = UDim2.fromScale(0, 0.1), Size = UDim2.fromScale(1, 0.9), Parent = content })
 	UIKit.new("UIListLayout", { Padding = UDim.new(0, 6), Parent = list })
 
 	if shopTab == "Robux" then
@@ -332,7 +358,7 @@ local function renderShop()
 				end
 			end)
 		end
-		UIKit.text({ Size = UDim2.new(1, -8, 0, 36), Text = "Robux items are convenience & cosmetics only. Everything that matters in a fight can be earned by playing.", TextColor3 = C.SubText, Font = Enum.Font.Gotham, Parent = list })
+		UIKit.text({ Size = UDim2.new(1, -8, 0, math.clamp(math.floor(contentSize().Y * 0.09), 24, 60)), Text = "Robux items are convenience & cosmetics only. Everything that matters in a fight can be earned by playing.", TextColor3 = C.SubText, Font = Enum.Font.Gotham, Parent = list })
 		return
 	end
 
@@ -429,6 +455,14 @@ function Panels.Init(context)
 	closeButton.Activated:Connect(Panels.Close)
 	windowSize = window.Size
 	window.Visible = false
+	local lastWidth = 0
+	content:GetPropertyChangedSignal("AbsoluteSize"):Connect(function()
+		local width = content.AbsoluteSize.X
+		if current and math.abs(width - lastWidth) > 40 then
+			lastWidth = width
+			Panels.Render(true)
+		end
+	end)
 
 	ctx.ProfileChanged:Connect(function()
 		Panels.Render(false)
