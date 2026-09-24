@@ -59,6 +59,26 @@ end
 
 ---------------------------------------------------------------------------------------------------
 print("== Installers")
+-- Simulate a user's own models in ServerStorage.MapAssets (one tree with a sneaky script, one grass part).
+do
+	local roblox = require("@lune/roblox")
+	local assets = sim.Instance.new("Folder")
+	assets.Name = "MapAssets"
+	local trees = sim.Instance.new("Folder", assets)
+	trees.Name = "Trees"
+	local tree = sim.Instance.new("Model", trees)
+	tree.Name = "MyTree"
+	local trunk = sim.Instance.new("Part", tree)
+	trunk.Size = roblox.Vector3.new(2, 14, 2)
+	trunk.CFrame = roblox.CFrame.new(50, 7, 50)
+	sim.Instance.new("Script", tree).Name = "Virus"
+	local grass = sim.Instance.new("Folder", assets)
+	grass.Name = "Grass"
+	local tuft = sim.Instance.new("Part", grass)
+	tuft.Name = "Tuft"
+	tuft.Size = roblox.Vector3.new(2, 1, 2)
+	assets.Parent = game:GetService("ServerStorage")
+end
 for _, file in { "01_Map.lua", "02_Shared.lua", "03_Server.lua", "04_Client.lua" } do
 	local before = #sim.errors
 	runSource(fs.readFile("installer/" .. file), file, nil)
@@ -76,6 +96,26 @@ check(#map.Resources:GetChildren() >= 20, "resources placed (" .. #map.Resources
 check(#map.EggSpots:GetChildren() >= 15, "egg spots placed (" .. #map.EggSpots:GetChildren() .. ")")
 check(#map.EnemySpawns:GetChildren() >= 10, "enemy spawns placed")
 check(game:GetService("StarterPack"):FindFirstChild("Torch") ~= nil, "Torch tool in StarterPack")
+check(sim.workspace:FindFirstChild("Baseplate") ~= nil, "studded Baseplate used as ground")
+local customTrees, scripts, floating = 0, 0, 0
+for _, m in map.Forest:GetChildren() do
+	if m.Name == "MyTree" then
+		customTrees += 1
+		local box, size = m:GetBoundingBox()
+		if math.abs(box.Position.Y - size.Y / 2) > 0.01 then
+			floating += 1
+		end
+	end
+end
+for _, d in map:GetDescendants() do
+	if d.ClassName == "Script" then
+		scripts += 1
+	end
+end
+check(customTrees > 100, ("user tree models used (%d placed)"):format(customTrees))
+check(floating == 0, "user trees sit exactly on the ground")
+check(scripts == 0, "scripts stripped from user models")
+check(map:FindFirstChild("Grass") and #map.Grass:GetChildren() > 100 and map.Grass:GetChildren()[1]:FindFirstChildWhichIsA("BasePart").CanCollide == false, "user grass scattered, no collision")
 check(RS.HatchOrDie.Config.GameConfig.ClassName == "ModuleScript", "shared modules installed")
 check(SSS.HatchOrDie.ClassName == "Script" and SSS.HatchOrDie.Services.CycleService ~= nil, "server script installed")
 check(SPS.HatchOrDieClient.ClassName == "LocalScript" and SPS.HatchOrDieClient.Hud ~= nil, "client script installed")

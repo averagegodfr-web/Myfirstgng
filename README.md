@@ -22,7 +22,25 @@ A complete v0.1 MVP for Roblox. It includes a forest map, 3 eggs, 3 creature fam
 5. To make saving work: **File → Publish to Roblox**, then **Game Settings → Security → Enable Studio Access to API Services**.
 
 Re-running an installer replaces what it built before, so you can update by pasting the new version.
-⚠️ Part 1 clears the terrain and rebuilds `Workspace.Map`.
+⚠️ Part 1 clears the terrain and rebuilds `Workspace.Map`. It keeps your studded **Baseplate** as the ground (and creates one if it's missing).
+
+## Using your own models (trees, grass, rocks, decor)
+
+Before running Part 1, put your models in **ServerStorage** like this:
+
+```
+ServerStorage
+└── MapAssets           (Folder)
+    ├── Trees           (Folder)  ← your tree models: replace the built-in trees
+    ├── Grass           (Folder)  ← grass clumps: scattered over the ground (walk-through)
+    ├── Rocks           (Folder)  ← rocks: replace the built-in rocks
+    └── Decor           (Folder)  ← flowers, logs, bushes...: scattered around (walk-through)
+```
+
+- Every folder is optional. Put several variants in one folder and they're mixed randomly, with random rotation and slightly random size.
+- Copies are anchored and placed on the ground automatically. **Scripts inside your models are removed from the copies** (this protects against free-model viruses).
+- The counts are at the top of `01_Map.lua` (`TREE_COUNT = 190`, `GRASS_COUNT = 350`, ...). Lower them if your models have lots of parts.
+- Then run Part 1 again. The Output window tells you how many of your models it used.
 
 ## Controls
 

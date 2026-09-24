@@ -2,10 +2,28 @@
 do
 -- HATCH OR DIE - installer PART 1 of 4: MAP + TORCH
 -- Paste everything into the Roblox Studio command bar (View > Command Bar) and press Enter.
--- Re-running rebuilds the map from scratch (it replaces Workspace.Map, terrain and the Torch).
+-- Re-running rebuilds the map from scratch (it replaces Workspace.Map and the Torch).
+--
+-- USE YOUR OWN MODELS: before running, put your models in ServerStorage like this:
+--   ServerStorage
+--   └── MapAssets        (Folder)
+--       ├── Trees        (Folder)  any number of tree models   -> replaces the built-in trees
+--       ├── Grass        (Folder)  grass clumps / tufts        -> scattered over the ground
+--       ├── Rocks        (Folder)  rocks / boulders            -> replaces the built-in rocks
+--       └── Decor        (Folder)  flowers, logs, bushes, etc. -> scattered around the forest
+-- Every folder is optional. Put several variants in a folder and they get mixed randomly.
+-- Scripts inside your models are removed from the copies (protects against free-model viruses).
+
+-- How many of each to place (lower these if your models have lots of parts).
+local TREE_COUNT = 190
+local GRASS_COUNT = 350
+local ROCK_COUNT = 40
+local DECOR_COUNT = 90
+local SCALE_VARIATION = { 0.85, 1.2 }
 
 local Players = game:GetService("Players")
 local StarterPack = game:GetService("StarterPack")
+local ServerStorage = game:GetService("ServerStorage")
 local rng = Random.new(1337)
 
 local CAMP = Vector3.new(0, 0, 0)
@@ -16,8 +34,8 @@ local ARENA = Vector3.new(0, 0, 190)
 local HIDDEN = Vector3.new(-235, 0, 165)
 local MAP_RADIUS = 265
 
--- Clean up previous installs and the default baseplate.
-for _, name in { "Map", "Baseplate", "Enemies", "Creatures", "Effects", "WorldEggs" } do
+-- Clean up previous installs (your Baseplate is kept).
+for _, name in { "Map", "Enemies", "Creatures", "Effects", "WorldEggs" } do
 	local old = workspace:FindFirstChild(name)
 	if old then
 		old:Destroy()
@@ -29,6 +47,21 @@ for _, child in workspace:GetChildren() do
 	end
 end
 workspace.Terrain:Clear()
+
+-- Ground: the studded Baseplate. Reuse the template's one, or make one if it's missing.
+local baseplate = workspace:FindFirstChild("Baseplate")
+if not baseplate then
+	baseplate = Instance.new("Part")
+	baseplate.Name = "Baseplate"
+	baseplate.Color = Color3.fromRGB(75, 151, 75)
+	baseplate.Material = Enum.Material.Plastic
+	baseplate.TopSurface = Enum.SurfaceType.Studs
+	baseplate.Parent = workspace
+end
+baseplate.Anchored = true
+baseplate.Locked = true
+baseplate.Size = Vector3.new(math.max(baseplate.Size.X, 640), 16, math.max(baseplate.Size.Z, 640))
+baseplate.CFrame = CFrame.new(0, -8, 0)
 
 local Map = Instance.new("Model")
 Map.Name = "Map"
@@ -106,10 +139,60 @@ local function randomRingPoint(minR, maxR)
 end
 
 ---------------------------------------------------------------------------------------------------
--- Ground (terrain) + paths
+-- Your models (ServerStorage.MapAssets)
 ---------------------------------------------------------------------------------------------------
-workspace.Terrain:FillBlock(CFrame.new(0, -8, 0), Vector3.new(640, 16, 640), Enum.Material.Grass)
-workspace.Terrain:FillBlock(CFrame.new(0, -8, 0), Vector3.new(80, 16, 80), Enum.Material.Ground)
+local assetsFolder = ServerStorage:FindFirstChild("MapAssets")
+
+local function assetList(folderName)
+	local list = {}
+	local f = assetsFolder and assetsFolder:FindFirstChild(folderName)
+	if f then
+		for _, child in f:GetChildren() do
+			if child:IsA("Model") or child:IsA("BasePart") then
+				table.insert(list, child)
+			end
+		end
+	end
+	return list
+end
+
+local TREE_ASSETS = assetList("Trees")
+local GRASS_ASSETS = assetList("Grass")
+local ROCK_ASSETS = assetList("Rocks")
+local DECOR_ASSETS = assetList("Decor")
+
+-- Clones a random variant, anchors it, strips scripts, randomly rotates/scales it and sets it on the ground.
+local function placeAsset(list, parent, position, decorative)
+	local clone = list[rng:NextInteger(1, #list)]:Clone()
+	local model = clone
+	if clone:IsA("BasePart") then
+		model = Instance.new("Model")
+		model.Name = clone.Name
+		clone.Parent = model
+	end
+	for _, d in model:GetDescendants() do
+		if d:IsA("BaseScript") or d:IsA("ModuleScript") then
+			d:Destroy()
+		elseif d:IsA("BasePart") then
+			d.Anchored = true
+			if decorative then
+				d.CanCollide = false
+				d.CanQuery = false
+				d.CanTouch = false
+				d.CastShadow = false
+			end
+		end
+	end
+	pcall(function()
+		model:ScaleTo(model:GetScale() * rng:NextNumber(SCALE_VARIATION[1], SCALE_VARIATION[2]))
+	end)
+	model:PivotTo(CFrame.new(position) * CFrame.Angles(0, rng:NextNumber(0, math.pi * 2), 0))
+	local box, size = model:GetBoundingBox()
+	local bottom = box.Position.Y - size.Y / 2
+	model:PivotTo(model:GetPivot() + Vector3.new(0, position.Y - bottom, 0))
+	model.Parent = parent
+	return model
+end
 
 local paths = folder("Paths")
 for _, path in PATHS do
@@ -137,6 +220,7 @@ end
 ---------------------------------------------------------------------------------------------------
 local camp = folder("Camp")
 part({ Parent = camp, Name = "CampCenter", Position = Vector3.new(0, 0.5, 0), Size = Vector3.new(1, 1, 1), Transparency = 1, CanCollide = false, CanQuery = false })
+part({ Parent = camp, Name = "CampGround", Shape = Enum.PartType.Cylinder, Size = Vector3.new(0.2, 70, 70), CFrame = CFrame.new(0, 0.05, 0) * CFrame.Angles(0, 0, math.rad(90)), Color = Color3.fromRGB(125, 100, 70), Material = Enum.Material.Ground, CanCollide = false })
 
 for i = 1, 10 do
 	local a = i / 10 * math.pi * 2
@@ -380,24 +464,71 @@ local forest = folder("Forest")
 local leafColors = { Color3.fromRGB(70, 140, 60), Color3.fromRGB(85, 160, 70), Color3.fromRGB(60, 120, 55), Color3.fromRGB(100, 150, 60) }
 local trees = 0
 local attempts = 0
-while trees < 190 and attempts < 4000 do
+while trees < TREE_COUNT and attempts < TREE_COUNT * 20 do
 	attempts += 1
 	local p = randomRingPoint(44, MAP_RADIUS + 20)
 	if isOpen(p, 0) then
 		trees += 1
-		local h = rng:NextNumber(12, 22)
-		local d = rng:NextNumber(1.8, 3.2)
-		column(forest, p, h, d, Color3.fromRGB(95, 70, 45), Enum.Material.Wood)
-		local leaf = leafColors[rng:NextInteger(1, #leafColors)]
-		local size = rng:NextNumber(9, 13)
-		ball(forest, p + Vector3.new(0, h + 1, 0), size, leaf, Enum.Material.LeafyGrass).CanCollide = false
-		ball(forest, p + Vector3.new(rng:NextNumber(-2, 2), h - 2.5, rng:NextNumber(-2, 2)), size * 0.85, leaf:Lerp(Color3.new(0, 0, 0), 0.1), Enum.Material.LeafyGrass).CanCollide = false
+		if #TREE_ASSETS > 0 then
+			placeAsset(TREE_ASSETS, forest, p, false)
+		else
+			local h = rng:NextNumber(12, 22)
+			local d = rng:NextNumber(1.8, 3.2)
+			column(forest, p, h, d, Color3.fromRGB(95, 70, 45), Enum.Material.Wood)
+			local leaf = leafColors[rng:NextInteger(1, #leafColors)]
+			local size = rng:NextNumber(9, 13)
+			ball(forest, p + Vector3.new(0, h + 1, 0), size, leaf, Enum.Material.LeafyGrass).CanCollide = false
+			ball(forest, p + Vector3.new(rng:NextNumber(-2, 2), h - 2.5, rng:NextNumber(-2, 2)), size * 0.85, leaf:Lerp(Color3.new(0, 0, 0), 0.1), Enum.Material.LeafyGrass).CanCollide = false
+		end
 	end
 end
-for _ = 1, 40 do
+for _ = 1, ROCK_COUNT do
 	local p = randomRingPoint(40, MAP_RADIUS)
 	if isOpen(p, -4) then
-		ball(forest, p + Vector3.new(0, 0.5, 0), rng:NextNumber(2.5, 6), Color3.fromRGB(115, 115, 120), Enum.Material.Slate)
+		if #ROCK_ASSETS > 0 then
+			placeAsset(ROCK_ASSETS, forest, p, false)
+		else
+			ball(forest, p + Vector3.new(0, 0.5, 0), rng:NextNumber(2.5, 6), Color3.fromRGB(115, 115, 120), Enum.Material.Slate)
+		end
+	end
+end
+
+-- Grass and decor are walk-through (no collision) so they never block players or clicks.
+local function isGroundFree(p)
+	if flatDist(p, CAMP) < 14 or flatDist(p, ARENA) < 46 or flatDist(p, RUINS) < 23 or flatDist(p, CAVE) < 22 or flatDist(p, CABIN) < 13 then
+		return false
+	end
+	for _, path in PATHS do
+		if distToSegment(p, path[1], path[2]) < 5 then
+			return false
+		end
+	end
+	return true
+end
+if #GRASS_ASSETS > 0 then
+	local grass = folder("Grass")
+	local placed = 0
+	attempts = 0
+	while placed < GRASS_COUNT and attempts < GRASS_COUNT * 10 do
+		attempts += 1
+		local p = randomRingPoint(0, MAP_RADIUS + 10)
+		if isGroundFree(p) then
+			placed += 1
+			placeAsset(GRASS_ASSETS, grass, p, true)
+		end
+	end
+end
+if #DECOR_ASSETS > 0 then
+	local decor = folder("Decor")
+	local placed = 0
+	attempts = 0
+	while placed < DECOR_COUNT and attempts < DECOR_COUNT * 20 do
+		attempts += 1
+		local p = randomRingPoint(20, MAP_RADIUS)
+		if isGroundFree(p) and isOpen(p, -20) then
+			placed += 1
+			placeAsset(DECOR_ASSETS, decor, p, true)
+		end
 	end
 end
 
@@ -547,7 +678,10 @@ torch.Parent = StarterPack
 
 Players.CharacterAutoLoads = false
 
-print("✅ HATCH OR DIE Part 1/4 done: map + torch built. Now run Part 2.")
+print(("✅ HATCH OR DIE Part 1/4 done: map + torch built. Your models used -> Trees: %d, Grass: %d, Rocks: %d, Decor: %d variants. Now run Part 2."):format(#TREE_ASSETS, #GRASS_ASSETS, #ROCK_ASSETS, #DECOR_ASSETS))
+if not assetsFolder then
+	print("ℹ️ No ServerStorage.MapAssets folder found, so built-in trees/rocks were used. See the top of this script to use your own models.")
+end
 end
 do
 -- HATCH OR DIE - installer PART 2 of 4: SHARED CODE (ReplicatedStorage)
