@@ -170,10 +170,94 @@ function UIKit.bar(props: { [string]: any }, fillColor: Color3): (Frame, Frame)
 	return back, fill
 end
 
+local function isZeroSize(size: any): boolean
+	return typeof(size) == "UDim2" and ((size.X.Scale == 0 and size.X.Offset <= 0) or (size.Y.Scale == 0 and size.Y.Offset <= 0))
+end
+
+local function hasVisibleChildren(inst: Instance): boolean
+	for _, child in inst:GetChildren() do
+		if child:IsA("GuiObject") and child.Visible then
+			return true
+		end
+	end
+	return false
+end
+
+-- True if, after these props are applied, the element draws nothing at all.
+local function becomesInvisible(inst: GuiObject, props: { [string]: any }): boolean
+	if props.Size ~= nil and isZeroSize(props.Size) then
+		return true
+	end
+	if props.GroupTransparency ~= nil and props.GroupTransparency >= 1 then
+		return true
+	end
+	local function final(key: string): number?
+		local v = props[key]
+		if v == nil then
+			local ok, current = pcall(function()
+				return (inst :: any)[key]
+			end)
+			v = if ok then current else nil
+		end
+		return v
+	end
+	local touched = props.BackgroundTransparency ~= nil or props.TextTransparency ~= nil or props.ImageTransparency ~= nil
+	if not touched then
+		return false
+	end
+	if (final("BackgroundTransparency") or 1) < 1 then
+		return false
+	end
+	if (inst:IsA("TextLabel") or inst:IsA("TextButton") or inst:IsA("TextBox")) and (final("TextTransparency") or 1) < 1 then
+		return false
+	end
+	if (inst:IsA("ImageLabel") or inst:IsA("ImageButton")) and (final("ImageTransparency") or 1) < 1 then
+		return false
+	end
+	return not hasVisibleChildren(inst)
+end
+
+-- Tween that also manages Visible: anything tweened to nothing (zero size or fully transparent)
+-- ends with Visible = false, and anything tweened back into view is made Visible first.
 function UIKit.tween(inst: Instance, time: number, props: { [string]: any }, style: Enum.EasingStyle?, direction: Enum.EasingDirection?): Tween
 	local tween = TweenService:Create(inst, TweenInfo.new(time, style or Enum.EasingStyle.Quad, direction or Enum.EasingDirection.Out), props)
+	if inst:IsA("GuiObject") then
+		local hides = becomesInvisible(inst, props)
+		if not hides then
+			local showsSomething = (props.Size ~= nil and not isZeroSize(props.Size))
+				or (props.BackgroundTransparency ~= nil and props.BackgroundTransparency < 1)
+				or (props.TextTransparency ~= nil and props.TextTransparency < 1)
+				or (props.ImageTransparency ~= nil and props.ImageTransparency < 1)
+				or (props.GroupTransparency ~= nil and props.GroupTransparency < 1)
+			if showsSomething then
+				inst.Visible = true
+			end
+		else
+			tween.Completed:Connect(function(state)
+				if state == Enum.PlaybackState.Completed and becomesInvisible(inst, props) then
+					inst.Visible = false
+				end
+			end)
+		end
+	end
 	tween:Play()
 	return tween
+end
+
+-- Progress bars: sets the fill width and hides it at zero (a rounded 0-width frame still shows a dot).
+function UIKit.setFill(fill: GuiObject, ratio: number, tweenTime: number?)
+	local r = math.clamp(ratio, 0, 1)
+	local size = UDim2.new(r, 0, fill.Size.Y.Scale, fill.Size.Y.Offset)
+	if r <= 0.001 then
+		fill.Size = size
+		fill.Visible = false
+	elseif tweenTime then
+		fill.Visible = true
+		UIKit.tween(fill, tweenTime, { Size = size })
+	else
+		fill.Visible = true
+		fill.Size = size
+	end
 end
 
 function UIKit.formatTime(seconds: number): string

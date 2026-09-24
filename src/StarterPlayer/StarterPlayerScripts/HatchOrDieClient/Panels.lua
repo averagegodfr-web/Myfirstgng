@@ -428,8 +428,8 @@ end
 
 function Panels.Close()
 	current = nil
-	window.Visible = false
 	clear()
+	UIKit.tween(window, 0.15, { Size = UDim2.new() }, Enum.EasingStyle.Quad, Enum.EasingDirection.In)
 end
 
 function Panels.Toggle(name: string)

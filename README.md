@@ -18,6 +18,7 @@ A complete v0.1 MVP for Roblox. It includes a forest map, 3 eggs, 3 creature fam
    | 4 | [`installer/04_Client.lua`](installer/04_Client.lua) | HUD, menus and hatch/evolve cinematics (StarterPlayerScripts) |
 
    You can also paste [`installer/ALL_IN_ONE.lua`](installer/ALL_IN_ONE.lua) once instead of the four parts.
+   Optional extras: [`05_ExportUI.lua`](installer/05_ExportUI.lua) (design the UI in StarterGui) and [`06_ExportAssets.lua`](installer/06_ExportAssets.lua) (edit or replace every model and effect).
 4. Press **Play** (F5). Your first egg starts hatching right away.
 5. To make saving work: **File → Publish to Roblox**, then **Game Settings → Security → Enable Studio Access to API Services**.
 
@@ -41,6 +42,76 @@ ServerStorage
 - Copies are anchored and placed on the ground automatically. **Scripts inside your models are removed from the copies** (this protects against free-model viruses).
 - The counts are at the top of `01_Map.lua` (`TREE_COUNT = 190`, `GRASS_COUNT = 350`, ...). Lower them if your models have lots of parts.
 - Then run Part 1 again. The Output window tells you how many of your models it used.
+
+## Customizing everything
+
+| What | How |
+|---|---|
+| **Numbers** (timings, prices, speeds, damage, drop rates) | `ReplicatedStorage.HatchOrDie.Config`: `GameConfig`, `EggData`, `CreatureData`, `EnemyData`, `ShopData` |
+| **UI** | `installer/05_ExportUI.lua`, see [Editing the UI visually](#editing-the-ui-visually) |
+| **Pet / enemy / boss / egg models + effects** | `installer/06_ExportAssets.lua`, see below |
+| **Map** | Edit `Workspace.Map` directly in Studio, or build your own, see [Your own map](#your-own-map) |
+
+### Models and effects (ReplicatedStorage.HatchOrDieAssets)
+
+Paste `installer/06_ExportAssets.lua` into the command bar. It creates:
+
+```
+ReplicatedStorage.HatchOrDieAssets
+├── Creatures
+│   ├── Sprout / Baby, Teen, Adult      ← one model per evolution stage
+│   ├── Ember  / Baby, Teen, Adult
+│   └── Shade  / Baby, Teen, Adult
+├── Enemies    / Crawler, Hunter, Brute, RotwoodColossus
+├── Eggs       / ForestEgg, EmberEgg, VoidEgg
+├── Effects                              ← templates in here are USED (empty = built-in effects)
+└── EffectExamples                       ← ready-made templates to drag into Effects
+```
+
+**Models:** edit the exported ones, or delete one and drop in your own model with the **same name**.
+- The model's **front** is its pivot's front, the blue arrow when you use the Pivot tool. Rotate the pivot if your pet walks sideways.
+- **Any size works.** The game centers it, welds it, turns off collisions, and puts the nameplate/health bar right above it.
+- **One model for all stages:** make `Creatures/Shade` a Model instead of a folder, and it gets scaled per stage.
+- **Special versions:** `Creatures/Sprout/Adult_Celestial` or `Enemies/Brute_Elite` override one mutation or variant.
+- **Mutation color:** mutations add particles and a glow. To recolor specific parts too, give them a boolean attribute `Tint = true`.
+- **Boss:** if your boss has a part named `Core`, it glows when exposed after a Slam. A Hunter part named `Eye` flashes before it shoots.
+- **Animations:** rig your model (Motor6Ds) and put `Animation` objects named `Idle`, `Walk`, `Attack` and/or `Ability` inside it. They play automatically.
+- **Scripts** inside models are removed from the in-game copies.
+- **To edit:** drag a model into Workspace, change it, then drag it back into its folder.
+
+**Effects:** a template is a Part, Model or Attachment holding ParticleEmitters, Sounds, Lights, Trails or Beams.
+- Attributes: `Lifetime` (seconds before cleanup, default 2) and `EmitDuration` (how long emitters stay on, default 0.15).
+- Sounds inside a template play automatically. That's how you add sound effects.
+
+| Effect name | When it plays |
+|---|---|
+| `Hit` | An enemy takes damage |
+| `Attack_Sprout`, `Attack_Shade` | Melee creature attacks |
+| `Projectile_Ember`, `Projectile_Hunter` | Flies from attacker to target (keep particles Enabled; add a Trail) |
+| `Ability_Sprout`, `Ability_Ember`, `Ability_Shade` | Creature abilities (Q) |
+| `Attack_Crawler`, `Smash_Brute` | Enemy attacks |
+| `EnemySpawn`, `EnemyDeath` | Enemy appears / dies |
+| `BossSpawn`, `BossSlam`, `BossSpikes`, `BossDeath` | Boss moments (`BossSpikes` plays along the Root Line) |
+| `TorchSwing` | Player swings the torch |
+| `Feed`, `Evolve`, `Revive`, `Knockout` | Creature moments |
+
+### Your own map
+
+Edit the generated `Workspace.Map` directly. Just don't re-run Part 1 afterwards, because it rebuilds the map.
+
+To build a map from scratch, the game only needs these inside a `Workspace.Map` Model or Folder. Everything else is decoration.
+
+| Name | What it is |
+|---|---|
+| `CampCenter` | Part at the center of camp. Enemies with no target walk here |
+| `BossArenaCenter` | Part where the boss appears |
+| `EnemySpawns` | Folder of Parts where enemies spawn at night |
+| `EggSpots` | Folder of Parts where eggs appear each day. Give each a string attribute `Area` = `Forest`, `Cave`, `Ruins`, `Cabin` or `Hidden` (rarer eggs in the special areas) |
+| `Resources` | Folder of Models named `BerryBush` (with child parts named `Berry`) and `CoinCrystal`, each with a PrimaryPart |
+| `ShopKeeper` | Model with a PrimaryPart. The shop prompt appears on it |
+| A `SpawnLocation` | Where players spawn |
+
+The ground's top surface should be at **Y = 0**, or change `GameConfig.GroundY`.
 
 ## Editing the UI visually
 

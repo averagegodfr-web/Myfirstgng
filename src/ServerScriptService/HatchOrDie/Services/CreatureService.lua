@@ -8,6 +8,8 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Registry = require(script.Parent.Parent.Registry)
 local Effects = require(script.Parent.Parent.Modules.Effects)
+local Mover = require(script.Parent.Parent.Modules.Mover)
+local Animate = require(script.Parent.Parent.Modules.Animate)
 
 local Root = ReplicatedStorage:WaitForChild("HatchOrDie")
 local GameConfig = require(Root.Config.GameConfig)
@@ -27,6 +29,10 @@ local rng = Random.new()
 
 local function serverNow(): number
 	return workspace:GetServerTimeNow()
+end
+
+local function flat(v: Vector3): Vector3
+	return Vector3.new(v.X, 0, v.Z)
 end
 
 local function flatDist(a: Vector3, b: Vector3): number
@@ -101,15 +107,25 @@ local function publish(state)
 	player:SetAttribute("CreatureKO", state.KO)
 	player:SetAttribute("CreatureMode", state.Mode)
 	if state.Bar then
-		state.Bar.Size = UDim2.fromScale(math.clamp(state.Health / state.MaxHealth, 0, 1), 1)
+		local ratio = math.clamp(state.Health / state.MaxHealth, 0, 1)
+		state.Bar.Size = UDim2.fromScale(ratio, 1)
+		state.Bar.Visible = ratio > 0.001
 	end
 end
 
+-- The nameplate hangs from an attachment just above the model's real top, and always draws on top.
 local function makeNameplate(model: Model, record, top: number)
+	local anchor = Instance.new("Attachment")
+	anchor.Name = "NameplateAttachment"
+	anchor.Position = Vector3.new(0, top + 0.6, 0)
+	anchor.Parent = model.PrimaryPart
+
 	local gui = Instance.new("BillboardGui")
 	gui.Name = "Nameplate"
+	gui.Adornee = anchor
 	gui.Size = UDim2.fromOffset(160, 38)
-	gui.StudsOffset = Vector3.new(0, top + 1.5, 0)
+	gui.SizeOffset = Vector2.new(0, 0.5)
+	gui.AlwaysOnTop = true
 	gui.MaxDistance = 90
 	gui.LightInfluence = 0
 
@@ -135,7 +151,7 @@ local function makeNameplate(model: Model, record, top: number)
 	fill.BorderSizePixel = 0
 	fill.Parent = back
 
-	gui.Parent = model.PrimaryPart
+	gui.Parent = model
 	return fill
 end
 
@@ -176,6 +192,7 @@ local function spawnFor(player: Player, keepHealthRatio: number?)
 	local rootPart = ownerRoot(player)
 	local base = if rootPart then rootPart.Position + Vector3.new(4, 0, 4) else Registry.EnemyService.GetCampPosition()
 	root.CFrame = CFrame.new(base.X, GameConfig.GroundY + hip, base.Z)
+	local mover = Mover.Attach(model, GameConfig.CreatureResponsiveness)
 
 	local state = {
 		Player = player,
@@ -197,9 +214,15 @@ local function spawnFor(player: Player, keepHealthRatio: number?)
 		KO = false,
 		Bob = 0,
 		Rainbow = record.Mutation == "Rainbow",
+		Mover = mover,
+		Pos = flat(base),
+		Vel = Vector3.zero,
+		Facing = Vector3.new(0, 0, -1),
+		Anim = Animate.Setup(model),
 	}
 	state.Bar = makeNameplate(model, record, top)
 	model.Parent = folder
+	Mover.Claim(mover)
 	active[player] = state
 	publish(state)
 	return state
@@ -225,13 +248,14 @@ local function revive(state, ratio: number)
 	end
 	state.KO = false
 	state.Health = state.MaxHealth * ratio
+	state.Model.Parent = folder
 	local rootPart = ownerRoot(state.Player)
 	if rootPart then
-		local p = rootPart.Position + Vector3.new(3, 0, 3)
-		state.Root.CFrame = CFrame.new(p.X, GameConfig.GroundY + state.Hip, p.Z)
+		state.Pos = flat(rootPart.Position + Vector3.new(3, 0, 3))
 	end
-	state.Model.Parent = folder
-	Effects.Burst(state.Root.Position, Color3.fromRGB(120, 255, 140), 4, 0.5)
+	state.Vel = Vector3.zero
+	Mover.Teleport(state.Mover, Vector3.new(state.Pos.X, GameConfig.GroundY + state.Hip, state.Pos.Z), state.Facing)
+	Effects.Burst(state.Root.Position, Color3.fromRGB(120, 255, 140), 4, 0.5, "Revive")
 	publish(state)
 end
 
@@ -246,7 +270,7 @@ function CreatureService.DamageCreature(state, amount: number)
 		state.Target = nil
 		state.KOToken = (state.KOToken or 0) + 1
 		local token = state.KOToken
-		Effects.Burst(state.Root.Position, Color3.fromRGB(255, 255, 255), 4, 0.4)
+		Effects.Burst(state.Root.Position, Color3.fromRGB(255, 255, 255), 4, 0.4, "Knockout")
 		state.Model.Parent = nil
 		local name = CreatureData.GetDisplayName(state.Record)
 		Net.Notify(state.Player, ("💫 %s was knocked out! Feed it a berry (F) or wait %ds."):format(name, GameConfig.CreatureKORecoverTime), Color3.fromRGB(255, 170, 60))
@@ -340,7 +364,7 @@ local function evolve(player: Player, id: string)
 	if profile.Equipped == record.Id then
 		local state = active[player]
 		if state and not state.KO then
-			Effects.Burst(state.Root.Position, Color3.new(1, 1, 1), 10, 0.8)
+			Effects.Burst(state.Root.Position, Color3.new(1, 1, 1), 10, 0.8, "Evolve")
 		end
 		spawnFor(player, 1)
 	end
@@ -402,15 +426,17 @@ end
 local function performAttack(state, target)
 	local player = state.Player
 	local damage = state.Stats.Damage
+	local family = state.Record.Family
+	Animate.Play(state.Anim, "Attack")
 	if state.Family.Ranged then
 		local from = state.Root.Position + Vector3.new(0, state.Hip * 0.5, 0)
-		local travel = Effects.Projectile(from, target.Root.Position, state.Family.Accent, 90, 0.9 * state.Scale)
+		local travel = Effects.Projectile(from, target.Root.Position, state.Family.Accent, 90, 0.9 * state.Scale, "Projectile_" .. family)
 		task.delay(travel, function()
 			Registry.EnemyService.Damage(target, damage, player)
 		end)
 	else
 		local look = state.Root.CFrame.LookVector
-		Effects.Burst(state.Root.Position + look * (state.Radius + 1), state.Family.Accent, 1.5 * state.Scale, 0.2)
+		Effects.Burst(state.Root.Position + look * (state.Radius + 1), state.Family.Accent, 1.5 * state.Scale, 0.2, "Attack_" .. family)
 		Registry.EnemyService.Damage(target, damage, player)
 	end
 end
@@ -426,10 +452,12 @@ local function useAbility(player: Player)
 	end
 	local ability = state.Family.Ability
 	local damage = state.Stats.Damage * ability.DamageMult
+	local effectName = "Ability_" .. state.Record.Family
+	Animate.Play(state.Anim, "Ability")
 
 	if ability.Kind == "Burst" then
 		local center = state.Root.Position
-		Effects.Burst(center, state.Family.Accent, ability.Radius, 0.5)
+		Effects.Burst(center, state.Family.Accent, ability.Radius, 0.5, effectName)
 		for _, e in Registry.EnemyService.GetInRadius(center, ability.Radius) do
 			Registry.EnemyService.Damage(e, damage, player)
 		end
@@ -461,8 +489,12 @@ local function useAbility(player: Player)
 		local dir = Vector3.new(tp.X - from.X, 0, tp.Z - from.Z)
 		local landing = if dir.Magnitude > 0.1 then tp - dir.Unit * (target.Radius + state.Radius) else tp
 		Effects.Burst(from, state.Family.Accent, 3, 0.3)
-		state.Root.CFrame = CFrame.lookAt(Vector3.new(landing.X, GameConfig.GroundY + state.Hip, landing.Z), Vector3.new(tp.X, GameConfig.GroundY + state.Hip, tp.Z))
-		Effects.Burst(landing, state.Family.Accent, 5, 0.4)
+		-- Swoop: move the goal; the physics mover carries the creature there in a quick arc.
+		state.Pos = flat(landing)
+		state.Vel = Vector3.zero
+		state.Facing = if dir.Magnitude > 0.1 then dir.Unit else state.Facing
+		Mover.Set(state.Mover, Vector3.new(landing.X, GameConfig.GroundY + state.Hip + 2, landing.Z), state.Facing)
+		Effects.Burst(landing, state.Family.Accent, 5, 0.4, effectName)
 		Registry.EnemyService.Damage(target, damage, player)
 		state.Target = target
 	end
@@ -491,50 +523,70 @@ local function step(state, dt: number, now: number)
 		end
 	end
 
-	local pos = state.Root.Position
+	local pos: Vector3 = state.Pos
+	local ownerPos = flat(rootPart.Position)
 	local target = if Registry.EnemyService.IsAlive(state.Target) then state.Target else nil
-	local goal: Vector3
-	local face: Vector3
+	local goal: Vector3? = nil
+	local wantFace: Vector3? = nil
+
 	if target then
-		local tp = target.Root.Position
-		local toTarget = Vector3.new(tp.X - pos.X, 0, tp.Z - pos.Z)
+		local tp = flat(target.Root.Position)
+		local toTarget = tp - pos
 		local reach = state.Stats.Range + target.Radius
 		if toTarget.Magnitude > reach * 0.85 then
 			goal = tp - toTarget.Unit * reach * 0.7
-		else
-			goal = pos
 		end
-		face = tp
+		wantFace = toTarget
 	else
-		goal = (rootPart.CFrame * CFrame.new(3.5 + state.Radius, 0, 4 + state.Radius)).Position
-		face = goal + rootPart.CFrame.LookVector * 10
+		-- Follow like a pet: keep whatever side it's on, only walk when it drifts out of the comfort band.
+		local offset = pos - ownerPos
+		local d = offset.Magnitude
+		local side = if d > 0.1 then offset / d else -flat(rootPart.CFrame.LookVector)
+		if side.Magnitude < 0.01 then
+			side = Vector3.new(0, 0, 1)
+		end
+		local followDist = GameConfig.CreatureFollowDistance + state.Radius
+		if d > GameConfig.CreatureLeashDistance then
+			state.Pos = ownerPos + side.Unit * followDist
+			state.Vel = Vector3.zero
+			Mover.Teleport(state.Mover, Vector3.new(state.Pos.X, GameConfig.GroundY + state.Hip, state.Pos.Z), state.Facing)
+			return
+		elseif d > followDist + 2.5 then
+			goal = ownerPos + side.Unit * followDist
+		elseif d < followDist * 0.45 then
+			goal = ownerPos + side.Unit * followDist * 0.8
+		end
+		wantFace = ownerPos - pos
 	end
 
-	local delta = Vector3.new(goal.X - pos.X, 0, goal.Z - pos.Z)
-	local dist = delta.Magnitude
-	local newPos = pos
-	if dist > CreatureService.LeashTeleport then
-		newPos = Vector3.new(goal.X, pos.Y, goal.Z)
-	elseif dist > 0.3 then
-		local speed = GameConfig.CreatureMoveSpeed * (if dist > 20 then 1.6 else 1)
-		newPos = pos + delta.Unit * math.min(dist, speed * dt)
+	local desired = Vector3.zero
+	if goal then
+		local to = goal - pos
+		local dist = to.Magnitude
+		if dist > 0.4 then
+			local speed = GameConfig.CreatureMoveSpeed * (if dist > 20 then 1.7 else 1) * math.clamp(dist / 6, 0.35, 1)
+			desired = to / dist * speed
+		end
+	end
+	state.Vel = state.Vel:Lerp(desired, math.clamp(dt * GameConfig.CreatureAcceleration, 0, 1))
+	pos += state.Vel * dt
+	state.Pos = pos
+
+	local speed = state.Vel.Magnitude
+	local faceGoal = if speed > 3 then state.Vel else wantFace
+	if faceGoal and faceGoal.Magnitude > 0.1 then
+		local blended = state.Facing:Lerp(faceGoal.Unit, math.clamp(dt * 8, 0, 1))
+		state.Facing = if blended.Magnitude > 0.01 then blended.Unit else faceGoal.Unit
 	end
 
-	local moving = (newPos - pos).Magnitude > 0.01
-	state.Bob += dt * (if moving then 14 else 3)
-	local y = GameConfig.GroundY + state.Hip + math.abs(math.sin(state.Bob)) * 0.25 * state.Scale
-	local lookDir = Vector3.new(face.X - newPos.X, 0, face.Z - newPos.Z)
-	if lookDir.Magnitude < 0.1 then
-		lookDir = state.Root.CFrame.LookVector * Vector3.new(1, 0, 1)
-	end
-	if lookDir.Magnitude < 0.01 then
-		lookDir = Vector3.new(0, 0, -1)
-	end
-	local at = Vector3.new(newPos.X, y, newPos.Z)
-	state.Root.CFrame = CFrame.lookAt(at, at + lookDir)
+	local moving01 = math.clamp(speed / GameConfig.CreatureMoveSpeed, 0, 1)
+	state.Bob += dt * (4 + 10 * moving01)
+	local hop = math.abs(math.sin(state.Bob)) * 0.35 * state.Scale * moving01 + math.sin(now * 2.2) * 0.06 * state.Scale
+	Mover.Set(state.Mover, Vector3.new(pos.X, GameConfig.GroundY + state.Hip + hop, pos.Z), state.Facing)
+	Animate.SetMoving(state.Anim, speed > 2)
 
 	if target and now >= state.NextAttack then
-		local d = flatDist(state.Root.Position, target.Root.Position)
+		local d = flatDist(pos, target.Root.Position)
 		if d <= state.Stats.Range + target.Radius + 0.5 then
 			state.NextAttack = now + 1 / state.Stats.AttackRate
 			performAttack(state, target)
@@ -551,7 +603,6 @@ local function step(state, dt: number, now: number)
 	end
 end
 
-CreatureService.LeashTeleport = GameConfig.CreatureLeashDistance
 
 ---------------------------------------------------------------------------------------------------
 -- Lifecycle
@@ -639,7 +690,7 @@ function CreatureService.Start()
 			Net.Notify(player, "🍓 Your creature is back on its feet!", Color3.fromRGB(120, 255, 140))
 		else
 			heal(state, state.MaxHealth * GameConfig.FeedHealPercent)
-			Effects.Burst(state.Root.Position + Vector3.new(0, state.Hip, 0), Color3.fromRGB(255, 110, 150), 2, 0.4)
+			Effects.Burst(state.Root.Position + Vector3.new(0, state.Hip, 0), Color3.fromRGB(255, 110, 150), 2, 0.4, "Feed")
 			Effects.FloatText(state.Root.Position + Vector3.new(0, state.Hip + 2, 0), "+" .. GameConfig.FeedXP .. " XP", Color3.fromRGB(255, 150, 200))
 		end
 		CreatureService.AddXP(player, GameConfig.FeedXP)

@@ -1151,7 +1151,11 @@ local GameConfig = {
 	-- Creatures
 	BaseCreatureSlots = 15,
 	ExtraSlotsBonus = 25,
-	CreatureMoveSpeed = 26,
+	CreatureMoveSpeed = 24,
+	CreatureFollowDistance = 5, -- studs from the player it likes to stay at
+	CreatureAcceleration = 7, -- higher = snappier starts/stops
+	CreatureResponsiveness = 30, -- physics smoothing (higher = tighter, lower = floatier)
+	EnemyResponsiveness = 25,
 	CreatureLeashDistance = 70,
 	CreatureAggroRadius = 40,
 	CreatureDefendRadius = 16,
@@ -1298,9 +1302,13 @@ end
 do
 local n3 = make(n1, "Folder", "Shared", nil)
 make(n3, "ModuleScript", "Models", [=[
--- Procedural models built from parts, so the game ships with zero uploaded assets.
--- Every model has an anchored, invisible "Root" PrimaryPart; all other parts are welded to it,
--- so the server only moves Root.CFrame. Attributes: HipHeight (root height above ground), Radius.
+-- Builds creature / enemy / egg models.
+-- 1) If ReplicatedStorage.HatchOrDieAssets has a custom model for it, that model is used.
+-- 2) Otherwise a procedural model is built from parts (so the game works with zero assets).
+-- Every returned model has an invisible "Root" PrimaryPart that everything else is welded to.
+-- Attributes: HipHeight (root height above ground), Radius, Top (height of the top above root), Scale.
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
 local Config = script.Parent.Parent.Config
 local CreatureData = require(Config.CreatureData)
 local EnemyData = require(Config.EnemyData)
@@ -1391,7 +1399,7 @@ end
 ---------------------------------------------------------------------------------------------------
 -- Creatures
 ---------------------------------------------------------------------------------------------------
-function Models.BuildCreature(record): Model
+local function proceduralCreature(record): Model
 	local fam = CreatureData.Families[record.Family] or CreatureData.Families.Sprout
 	local stageIndex = math.clamp(record.Stage or 1, 1, #CreatureData.Stages)
 	local s = CreatureData.Stages[stageIndex].Scale
@@ -1546,7 +1554,7 @@ end
 ---------------------------------------------------------------------------------------------------
 -- Enemies
 ---------------------------------------------------------------------------------------------------
-function Models.BuildEnemy(typeId: string, variantId: string?): Model
+local function proceduralEnemy(typeId: string, variantId: string?): Model
 	local data = EnemyData.Types[typeId]
 	local variant = EnemyData.Variants[variantId or "Normal"] or EnemyData.Variants.Normal
 	local k = variant.Scale or 1
@@ -1636,7 +1644,7 @@ end
 ---------------------------------------------------------------------------------------------------
 -- Eggs
 ---------------------------------------------------------------------------------------------------
-function Models.BuildEgg(eggId: string): Model
+local function proceduralEgg(eggId: string): Model
 	local egg = EggData[eggId] or EggData.ForestEgg
 	local model, root, add = makeModel(eggId, false)
 	add(ellipsoid(Vector3.new(2, 2.6, 2), egg.Color), CFrame.new(), "Shell")
@@ -1660,6 +1668,210 @@ function Models.BuildEgg(eggId: string): Model
 	model:SetAttribute("Radius", 1)
 	return model
 end
+
+---------------------------------------------------------------------------------------------------
+-- Custom assets (ReplicatedStorage.HatchOrDieAssets)
+---------------------------------------------------------------------------------------------------
+Models.ASSETS_NAME = "HatchOrDieAssets"
+
+function Models.GetAsset(category: string, ...: string): Instance?
+	local assets = ReplicatedStorage:FindFirstChild(Models.ASSETS_NAME)
+	local folder = assets and assets:FindFirstChild(category)
+	if not folder then
+		return nil
+	end
+	local current: Instance = folder
+	for i = 1, select("#", ...) do
+		local name = select(i, ...)
+		local nextChild = current:FindFirstChild(name)
+		if not nextChild then
+			return nil
+		end
+		current = nextChild
+	end
+	if current == folder or current:IsA("Folder") then
+		return nil
+	end
+	return current
+end
+
+local function hasInternalJoints(model: Instance): boolean
+	for _, d in model:GetDescendants() do
+		if d:IsA("Motor6D") or d:IsA("Weld") or d:IsA("WeldConstraint") or d:IsA("ManualWeld") or d:IsA("Bone") then
+			return true
+		end
+	end
+	return false
+end
+
+-- Turns any designer model into a game-ready one: front = the model's pivot front (-Z / LookVector),
+-- centered on a new invisible Root, everything welded, non-colliding, scripts removed.
+function Models.PrepareCustom(template: Instance, scale: number?, queryable: boolean?): Model
+	local clone = template:Clone()
+	local model: Model
+	if clone:IsA("Model") then
+		model = clone
+	else
+		model = Instance.new("Model")
+		model.Name = clone.Name
+		clone.Parent = model
+	end
+	for _, d in model:GetDescendants() do
+		if d:IsA("BaseScript") or d:IsA("ModuleScript") then
+			d:Destroy()
+		elseif d:IsA("Humanoid") then
+			d.EvaluateStateMachine = false
+		end
+	end
+	local oldPrimary = model.PrimaryPart
+	for _, d in model:GetDescendants() do
+		if d:IsA("BasePart") and d.Name == "Root" then
+			d.Name = "Root_Original"
+		end
+	end
+	if scale and scale ~= 1 then
+		pcall(function()
+			model:ScaleTo(model:GetScale() * scale)
+		end)
+	end
+	model:PivotTo(CFrame.new())
+
+	local boxCFrame, size = model:GetBoundingBox()
+	local jointed = hasInternalJoints(model)
+	local root = newPart(Vector3.new(1, 1, 1), Color3.new(1, 1, 1))
+	root.Name = "Root"
+	root.Transparency = 1
+	root.Anchored = true
+	root.CFrame = CFrame.new(boxCFrame.Position)
+	root.Parent = model
+
+	local main = oldPrimary or model:FindFirstChild("HumanoidRootPart") or model:FindFirstChildWhichIsA("BasePart", true)
+	for _, d in model:GetDescendants() do
+		if d:IsA("BasePart") and d ~= root then
+			d.Anchored = false
+			d.CanCollide = false
+			d.CanTouch = false
+			d.CanQuery = queryable == true
+			d.Massless = true
+			if not jointed or d == main then
+				local weld = Instance.new("WeldConstraint")
+				weld.Part0 = root
+				weld.Part1 = d
+				weld.Parent = d
+			end
+		end
+	end
+	model.PrimaryPart = root
+	model:SetAttribute("HipHeight", size.Y / 2)
+	model:SetAttribute("Radius", math.max(size.X, size.Z) / 2)
+	model:SetAttribute("Top", size.Y / 2)
+	model:SetAttribute("Custom", true)
+	return model
+end
+
+local function tintMarked(model: Model, color: Color3, amount: number)
+	for _, d in model:GetDescendants() do
+		if d:IsA("BasePart") and d:GetAttribute("Tint") then
+			d.Color = d.Color:Lerp(color, amount)
+		end
+	end
+end
+
+-- Mutation + aura visuals for custom creature models (procedural ones do this themselves).
+local function applyCreatureFlair(model: Model, record, s: number)
+	local root = model.PrimaryPart :: BasePart
+	local mut = record.Mutation and CreatureData.MutationById[record.Mutation]
+	if mut then
+		tintMarked(model, mut.Color, 0.6)
+		particles(root, mut.Color, 0.35 * s, 8)
+		local light = Instance.new("PointLight")
+		light.Color = mut.Color
+		light.Range = 8 * s
+		light.Parent = root
+	end
+	if record.Aura then
+		local aura = CreatureData.Auras[record.Aura]
+		if aura then
+			local e = particles(root, aura.Color, 0.7 * s, 16, 2)
+			e.Name = "Aura"
+			local light = Instance.new("PointLight")
+			light.Name = "AuraLight"
+			light.Color = aura.Color
+			light.Range = 8 * s
+			light.Brightness = 1.5
+			light.Parent = root
+		end
+	end
+end
+
+-- Creatures: Assets/Creatures/<Family>/<Stage>_<Mutation>, then <Stage> (Baby/Teen/Adult or 1/2/3),
+-- then Assets/Creatures/<Family> as a single model scaled per stage.
+function Models.BuildCreature(record): Model
+	local stageIndex = math.clamp(record.Stage or 1, 1, #CreatureData.Stages)
+	local stage = CreatureData.Stages[stageIndex]
+	local family = record.Family
+	local template, scale = nil, 1
+	if record.Mutation then
+		template = Models.GetAsset("Creatures", family, stage.Name .. "_" .. record.Mutation)
+			or Models.GetAsset("Creatures", family, tostring(stageIndex) .. "_" .. record.Mutation)
+	end
+	template = template or Models.GetAsset("Creatures", family, stage.Name) or Models.GetAsset("Creatures", family, tostring(stageIndex))
+	if not template then
+		template = Models.GetAsset("Creatures", family)
+		scale = stage.Scale
+	end
+	if not template then
+		return proceduralCreature(record)
+	end
+	local model = Models.PrepareCustom(template, scale, false)
+	model.Name = family
+	model:SetAttribute("Scale", stage.Scale)
+	applyCreatureFlair(model, record, stage.Scale)
+	return model
+end
+
+-- Enemies: Assets/Enemies/<TypeId>_<Variant>, then Assets/Enemies/<TypeId> (scaled + tinted per variant).
+function Models.BuildEnemy(typeId: string, variantId: string?): Model
+	local vId = variantId or "Normal"
+	local variant = EnemyData.Variants[vId] or EnemyData.Variants.Normal
+	local template = Models.GetAsset("Enemies", typeId .. "_" .. vId)
+	local scale = 1
+	if not template then
+		template = Models.GetAsset("Enemies", typeId)
+		scale = variant.Scale or 1
+	end
+	if not template then
+		return proceduralEnemy(typeId, variantId)
+	end
+	local model = Models.PrepareCustom(template, scale, true)
+	model.Name = typeId
+	if variant.Tint then
+		tintMarked(model, variant.Tint, 0.5)
+		local light = Instance.new("PointLight")
+		light.Color = variant.Tint
+		light.Range = 10
+		light.Parent = model.PrimaryPart
+	end
+	return model
+end
+
+-- Eggs: Assets/Eggs/<EggId>.
+function Models.BuildEgg(eggId: string): Model
+	local template = Models.GetAsset("Eggs", eggId)
+	if not template then
+		return proceduralEgg(eggId)
+	end
+	local model = Models.PrepareCustom(template, 1, false)
+	model.Name = eggId
+	return model
+end
+
+-- Built-in versions, used by the asset exporter as editable starting points.
+Models.Procedural = {
+	Creature = proceduralCreature,
+	Enemy = proceduralEnemy,
+	Egg = proceduralEgg,
+}
 
 return Models
 ]=])
@@ -1857,6 +2069,82 @@ print("[HATCH OR DIE] Server started")
 ]=])
 do
 local n2 = make(n1, "Folder", "Modules", nil)
+make(n2, "ModuleScript", "Animate", [=[
+-- Plays designer animations on custom models. Put Animation objects named Idle, Walk, Attack
+-- and/or Ability anywhere inside a creature or enemy model (rigged with Motor6Ds). Missing ones are skipped.
+local Animate = {}
+
+export type Controller = {
+	Tracks: { [string]: AnimationTrack },
+	Moving: boolean?,
+}
+
+function Animate.Setup(model: Model): Controller?
+	local animations = {}
+	for _, d in model:GetDescendants() do
+		if d:IsA("Animation") and (d.Name == "Idle" or d.Name == "Walk" or d.Name == "Attack" or d.Name == "Ability") then
+			animations[d.Name] = d
+		end
+	end
+	if next(animations) == nil then
+		return nil
+	end
+	local animator = model:FindFirstChildWhichIsA("Animator", true)
+	if not animator then
+		local humanoid = model:FindFirstChildWhichIsA("Humanoid", true)
+		local host = humanoid or model:FindFirstChildWhichIsA("AnimationController", true)
+		if not host then
+			host = Instance.new("AnimationController")
+			host.Parent = model
+		end
+		animator = Instance.new("Animator")
+		animator.Parent = host
+	end
+	local controller: Controller = { Tracks = {}, Moving = nil }
+	for name, animation in animations do
+		local ok, track = pcall(function()
+			return (animator :: Animator):LoadAnimation(animation)
+		end)
+		if ok and track then
+			track.Looped = name == "Idle" or name == "Walk"
+			controller.Tracks[name] = track
+		end
+	end
+	return controller
+end
+
+function Animate.SetMoving(controller: Controller?, moving: boolean)
+	if not controller or controller.Moving == moving then
+		return
+	end
+	controller.Moving = moving
+	local walk, idle = controller.Tracks.Walk, controller.Tracks.Idle
+	if moving then
+		if idle then
+			idle:Stop(0.2)
+		end
+		if walk then
+			walk:Play(0.2)
+		end
+	else
+		if walk then
+			walk:Stop(0.2)
+		end
+		if idle then
+			idle:Play(0.2)
+		end
+	end
+end
+
+function Animate.Play(controller: Controller?, name: string)
+	local track = controller and controller.Tracks[name]
+	if track then
+		track:Play(0.05)
+	end
+end
+
+return Animate
+]=])
 make(n2, "ModuleScript", "Atmosphere", [=[
 -- Lighting presets for each phase. The same map reads completely differently per preset.
 local Lighting = game:GetService("Lighting")
@@ -1992,8 +2280,12 @@ return Atmosphere
 ]=])
 make(n2, "ModuleScript", "Effects", [=[
 -- Short-lived server VFX. Everything is anchored, non-colliding and cleaned up by Debris.
+-- Any effect with a name can be replaced by a designer template in ReplicatedStorage.HatchOrDieAssets.Effects
+-- (a Part, Model or Attachment holding ParticleEmitters / Sounds / Lights). Template attributes:
+--   Lifetime (seconds before cleanup, default 2), EmitDuration (seconds emitters stay on, default 0.15).
 local TweenService = game:GetService("TweenService")
 local Debris = game:GetService("Debris")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Effects = {}
 
@@ -2026,7 +2318,92 @@ local function fxPart(size: Vector3, color: Color3, shape: Enum.PartType?): Part
 	return p
 end
 
-function Effects.Burst(position: Vector3, color: Color3, radius: number, duration: number?)
+local function template(name: string?): Instance?
+	if not name then
+		return nil
+	end
+	local assets = ReplicatedStorage:FindFirstChild("HatchOrDieAssets")
+	local effects = assets and assets:FindFirstChild("Effects")
+	return effects and effects:FindFirstChild(name)
+end
+
+function Effects.HasCustom(name: string): boolean
+	return template(name) ~= nil
+end
+
+-- Turns a template clone into an anchored effect at `cf`. Returns the part that holds it.
+local function place(fx: Instance, cf: CFrame): Instance
+	for _, d in fx:GetDescendants() do
+		if d:IsA("BaseScript") or d:IsA("ModuleScript") then
+			d:Destroy()
+		end
+	end
+	local holder: Instance = fx
+	if fx:IsA("Attachment") then
+		local part = fxPart(Vector3.new(0.2, 0.2, 0.2), Color3.new(1, 1, 1))
+		part.Transparency = 1
+		part.CFrame = cf
+		fx.Parent = part
+		holder = part
+	elseif fx:IsA("BasePart") then
+		fx.Anchored = true
+		fx.CanCollide = false
+		fx.CanQuery = false
+		fx.CanTouch = false
+		fx.CFrame = cf
+	elseif fx:IsA("Model") then
+		for _, d in fx:GetDescendants() do
+			if d:IsA("BasePart") then
+				d.Anchored = true
+				d.CanCollide = false
+				d.CanQuery = false
+				d.CanTouch = false
+			end
+		end
+		fx:PivotTo(cf)
+	end
+	return holder
+end
+
+local function start(holder: Instance, source: Instance)
+	for _, d in holder:GetDescendants() do
+		if d:IsA("Sound") then
+			d:Play()
+		elseif d:IsA("ParticleEmitter") then
+			d.Enabled = true
+		end
+	end
+	local emitFor = source:GetAttribute("EmitDuration") or 0.15
+	task.delay(emitFor, function()
+		for _, d in holder:GetDescendants() do
+			if d:IsA("ParticleEmitter") then
+				d.Enabled = false
+			end
+		end
+	end)
+	Debris:AddItem(holder, source:GetAttribute("Lifetime") or 2)
+end
+
+-- Plays a designer effect if one exists. Returns true when it did.
+function Effects.Custom(name: string?, position: Vector3, direction: Vector3?): boolean
+	local source = template(name)
+	if not source then
+		return false
+	end
+	local cf = CFrame.new(position)
+	if direction and direction.Magnitude > 0.01 then
+		cf = CFrame.lookAt(position, position + direction)
+	end
+	local holder = place(source:Clone(), cf)
+	holder.Parent = getFolder()
+	start(holder, source)
+	return true
+end
+
+function Effects.Burst(position: Vector3, color: Color3, radius: number, duration: number?, name: string?)
+	if Effects.Custom(name, position) then
+		return
+	end
 	local d = duration or 0.45
 	local p = fxPart(Vector3.new(1, 1, 1), color, Enum.PartType.Ball)
 	p.Transparency = 0.25
@@ -2040,9 +2417,50 @@ function Effects.Burst(position: Vector3, color: Color3, radius: number, duratio
 end
 
 -- Returns travel time so the caller can apply damage on arrival.
-function Effects.Projectile(from: Vector3, to: Vector3, color: Color3, speed: number, size: number?): number
+function Effects.Projectile(from: Vector3, to: Vector3, color: Color3, speed: number, size: number?, name: string?): number
 	local dist = (to - from).Magnitude
 	local t = math.max(0.05, dist / speed)
+	local source = template(name)
+	if source then
+		local startCF = if dist > 0.01 then CFrame.lookAt(from, to) else CFrame.new(from)
+		local fx = source:Clone()
+		local holder = place(fx, startCF)
+		local mover: BasePart? = nil
+		if holder:IsA("BasePart") then
+			mover = holder
+		elseif holder:IsA("Model") then
+			mover = holder.PrimaryPart or holder:FindFirstChildWhichIsA("BasePart", true)
+			for _, d in holder:GetDescendants() do
+				if d:IsA("BasePart") and d ~= mover then
+					d.Anchored = false
+					local weld = Instance.new("WeldConstraint")
+					weld.Part0 = mover
+					weld.Part1 = d
+					weld.Parent = d
+				end
+			end
+		end
+		holder.Parent = getFolder()
+		for _, d in holder:GetDescendants() do
+			if d:IsA("Sound") then
+				d:Play()
+			end
+		end
+		if mover then
+			TweenService:Create(mover, TweenInfo.new(t, Enum.EasingStyle.Linear), { CFrame = startCF - startCF.Position + to }):Play()
+		end
+		task.delay(t, function()
+			for _, d in holder:GetDescendants() do
+				if d:IsA("ParticleEmitter") or d:IsA("Trail") or d:IsA("Beam") then
+					d.Enabled = false
+				elseif d:IsA("BasePart") then
+					d.Transparency = 1
+				end
+			end
+		end)
+		Debris:AddItem(holder, t + (source:GetAttribute("Lifetime") or 1))
+		return t
+	end
 	local p = fxPart(Vector3.new(1, 1, 1) * (size or 1.2), color, Enum.PartType.Ball)
 	p.Position = from
 	local light = Instance.new("PointLight")
@@ -2076,6 +2494,12 @@ end
 function Effects.Spikes(origin: Vector3, direction: Vector3, length: number, color: Color3)
 	local dir = Vector3.new(direction.X, 0, direction.Z).Unit
 	local count = math.floor(length / 5)
+	if Effects.HasCustom("BossSpikes") then
+		for i = 1, count do
+			task.delay(i * 0.03, Effects.Custom, "BossSpikes", origin + dir * (i * 5), dir)
+		end
+		return
+	end
 	for i = 1, count do
 		local pos = origin + dir * (i * 5)
 		local spike = Instance.new("WedgePart")
@@ -2141,6 +2565,77 @@ function Effects.FadeOut(model: Model, duration: number?)
 end
 
 return Effects
+]=])
+make(n2, "ModuleScript", "Mover", [=[
+-- Smooth server-driven movement. Instead of teleporting an anchored part every frame (which looks
+-- choppy on clients), the model is unanchored and pulled toward a goal by AlignPosition/AlignOrientation.
+-- Roblox replicates and interpolates physics, so everyone sees smooth motion.
+local Mover = {}
+
+export type Mover = {
+	Root: BasePart,
+	Position: AlignPosition,
+	Orientation: AlignOrientation,
+}
+
+function Mover.Attach(model: Model, responsiveness: number?): Mover
+	local root = model.PrimaryPart :: BasePart
+	root.Anchored = false
+	root.Massless = false
+	root.CanCollide = false
+	root.CanTouch = false
+
+	local attachment = Instance.new("Attachment")
+	attachment.Name = "MoverAttachment"
+	attachment.Parent = root
+
+	local align = Instance.new("AlignPosition")
+	align.Mode = Enum.PositionAlignmentMode.OneAttachment
+	align.Attachment0 = attachment
+	align.MaxForce = math.huge
+	align.MaxVelocity = math.huge
+	align.Responsiveness = responsiveness or 35
+	align.Position = root.Position
+	align.Parent = root
+
+	local orient = Instance.new("AlignOrientation")
+	orient.Mode = Enum.OrientationAlignmentMode.OneAttachment
+	orient.Attachment0 = attachment
+	orient.MaxTorque = math.huge
+	orient.MaxAngularVelocity = math.huge
+	orient.Responsiveness = (responsiveness or 35) * 0.7
+	orient.CFrame = root.CFrame - root.Position
+	orient.Parent = root
+
+	return { Root = root, Position = align, Orientation = orient }
+end
+
+-- Call after the model is parented to Workspace so the server keeps authority over the physics.
+function Mover.Claim(mover: Mover)
+	pcall(function()
+		mover.Root:SetNetworkOwner(nil)
+	end)
+end
+
+function Mover.Set(mover: Mover, position: Vector3, facing: Vector3?)
+	mover.Position.Position = position
+	if facing and facing.Magnitude > 0.01 then
+		local flat = Vector3.new(facing.X, 0, facing.Z)
+		if flat.Magnitude > 0.01 then
+			mover.Orientation.CFrame = CFrame.lookAt(Vector3.zero, flat)
+		end
+	end
+end
+
+-- Instantly move (spawns, revives, leash snaps).
+function Mover.Teleport(mover: Mover, position: Vector3, facing: Vector3?)
+	Mover.Set(mover, position, facing)
+	mover.Root.CFrame = CFrame.new(position) * mover.Orientation.CFrame.Rotation
+	mover.Root.AssemblyLinearVelocity = Vector3.zero
+	Mover.Claim(mover)
+end
+
+return Mover
 ]=])
 end
 make(n1, "ModuleScript", "Registry", [=[
@@ -2226,7 +2721,7 @@ local function slam(e)
 		if not e.Alive then
 			return
 		end
-		Effects.Burst(Vector3.new(center.X, 1, center.Z), Color3.fromRGB(120, 90, 60), SLAM_RADIUS, 0.5)
+		Effects.Burst(Vector3.new(center.X, 1, center.Z), Color3.fromRGB(120, 90, 60), SLAM_RADIUS, 0.5, "BossSlam")
 		shake(1)
 		for _, t in Registry.EnemyService.GatherTargets() do
 			if flatDist(t.Root.Position, center) <= SLAM_RADIUS + Registry.EnemyService.TargetRadius(t) then
@@ -2261,7 +2756,7 @@ local function rootLine(e, target)
 	local windup = if e.Enraged then 0.9 else 1.1
 	local origin = e.Root.Position
 	local toTarget = Vector3.new(target.Root.Position.X - origin.X, 0, target.Root.Position.Z - origin.Z)
-	local dir = if toTarget.Magnitude > 0.1 then toTarget.Unit else e.Root.CFrame.LookVector
+	local dir = if toTarget.Magnitude > 0.1 then toTarget.Unit else e.Facing
 	Effects.Telegraph(origin + dir * (LINE_LENGTH / 2), "Rect", Vector2.new(LINE_WIDTH, LINE_LENGTH), windup, dir)
 	task.delay(windup, function()
 		if not e.Alive then
@@ -2322,6 +2817,7 @@ end
 
 local function tick(e, dt: number, now: number, targets)
 	if e.Busy then
+		Registry.EnemyService.Steer(e, Vector3.zero, nil, dt)
 		return
 	end
 	if now >= (e.NextRetarget or 0) then
@@ -2337,17 +2833,13 @@ local function tick(e, dt: number, now: number, targets)
 	end
 
 	local target = if e.Target and Registry.EnemyService.IsTargetValid(e.Target) then e.Target else nil
-	local pos = e.Root.Position
+	local pos = e.Pos
 	local goal = if target then target.Root.Position else arenaCenter
 	local toGoal = Vector3.new(goal.X - pos.X, 0, goal.Z - pos.Z)
 	local dist = toGoal.Magnitude
-	local dir = if dist > 0.1 then toGoal / dist else e.Root.CFrame.LookVector
-
-	local newPos = pos
-	if dist > 12 then
-		newPos = pos + dir * e.Speed * dt
-	end
-	e.Root.CFrame = CFrame.lookAt(newPos, newPos + Vector3.new(dir.X, 0, dir.Z))
+	local dir = if dist > 0.1 then toGoal / dist else e.Facing
+	local move = if dist > 12 then dir * e.Speed * math.clamp((dist - 12) / 6, 0.3, 1) else Vector3.zero
+	Registry.EnemyService.Steer(e, move, dir, dt)
 
 	if target and now >= e.NextAttack then
 		if dist <= SLAM_RADIUS + 2 then
@@ -2362,7 +2854,7 @@ local function onDeath(e, killer: Player?)
 	boss = nil
 	pushBar(true)
 	shake(1.5)
-	Effects.Burst(e.Root.Position, Color3.fromRGB(150, 255, 90), 30, 1.2)
+	Effects.Burst(e.Root.Position, Color3.fromRGB(150, 255, 90), 30, 1.2, "BossDeath")
 	local who = if killer then (" " .. killer.DisplayName .. " landed the final blow!") else ""
 	Net.Announce("🏆 THE ROTWOOD COLOSSUS HAS FALLEN!" .. who, Color3.fromRGB(255, 215, 60), true)
 
@@ -2465,7 +2957,7 @@ local function swing(player: Player)
 	local look = rootPart.CFrame.LookVector
 	local flatLook = Vector3.new(look.X, 0, look.Z).Unit
 	local origin = rootPart.Position
-	Effects.Burst(origin + flatLook * 4, Color3.fromRGB(255, 160, 50), 2.5, 0.2)
+	Effects.Burst(origin + flatLook * 4, Color3.fromRGB(255, 160, 50), 2.5, 0.2, "TorchSwing")
 
 	local damage = torchDamage()
 	for _, e in Registry.EnemyService.GetInRadius(origin, GameConfig.TorchRange + 2) do
@@ -2529,6 +3021,8 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Registry = require(script.Parent.Parent.Registry)
 local Effects = require(script.Parent.Parent.Modules.Effects)
+local Mover = require(script.Parent.Parent.Modules.Mover)
+local Animate = require(script.Parent.Parent.Modules.Animate)
 
 local Root = ReplicatedStorage:WaitForChild("HatchOrDie")
 local GameConfig = require(Root.Config.GameConfig)
@@ -2548,6 +3042,10 @@ local rng = Random.new()
 
 local function serverNow(): number
 	return workspace:GetServerTimeNow()
+end
+
+local function flat(v: Vector3): Vector3
+	return Vector3.new(v.X, 0, v.Z)
 end
 
 local function flatDist(a: Vector3, b: Vector3): number
@@ -2622,15 +3120,25 @@ local function publish(state)
 	player:SetAttribute("CreatureKO", state.KO)
 	player:SetAttribute("CreatureMode", state.Mode)
 	if state.Bar then
-		state.Bar.Size = UDim2.fromScale(math.clamp(state.Health / state.MaxHealth, 0, 1), 1)
+		local ratio = math.clamp(state.Health / state.MaxHealth, 0, 1)
+		state.Bar.Size = UDim2.fromScale(ratio, 1)
+		state.Bar.Visible = ratio > 0.001
 	end
 end
 
+-- The nameplate hangs from an attachment just above the model's real top, and always draws on top.
 local function makeNameplate(model: Model, record, top: number)
+	local anchor = Instance.new("Attachment")
+	anchor.Name = "NameplateAttachment"
+	anchor.Position = Vector3.new(0, top + 0.6, 0)
+	anchor.Parent = model.PrimaryPart
+
 	local gui = Instance.new("BillboardGui")
 	gui.Name = "Nameplate"
+	gui.Adornee = anchor
 	gui.Size = UDim2.fromOffset(160, 38)
-	gui.StudsOffset = Vector3.new(0, top + 1.5, 0)
+	gui.SizeOffset = Vector2.new(0, 0.5)
+	gui.AlwaysOnTop = true
 	gui.MaxDistance = 90
 	gui.LightInfluence = 0
 
@@ -2656,7 +3164,7 @@ local function makeNameplate(model: Model, record, top: number)
 	fill.BorderSizePixel = 0
 	fill.Parent = back
 
-	gui.Parent = model.PrimaryPart
+	gui.Parent = model
 	return fill
 end
 
@@ -2697,6 +3205,7 @@ local function spawnFor(player: Player, keepHealthRatio: number?)
 	local rootPart = ownerRoot(player)
 	local base = if rootPart then rootPart.Position + Vector3.new(4, 0, 4) else Registry.EnemyService.GetCampPosition()
 	root.CFrame = CFrame.new(base.X, GameConfig.GroundY + hip, base.Z)
+	local mover = Mover.Attach(model, GameConfig.CreatureResponsiveness)
 
 	local state = {
 		Player = player,
@@ -2718,9 +3227,15 @@ local function spawnFor(player: Player, keepHealthRatio: number?)
 		KO = false,
 		Bob = 0,
 		Rainbow = record.Mutation == "Rainbow",
+		Mover = mover,
+		Pos = flat(base),
+		Vel = Vector3.zero,
+		Facing = Vector3.new(0, 0, -1),
+		Anim = Animate.Setup(model),
 	}
 	state.Bar = makeNameplate(model, record, top)
 	model.Parent = folder
+	Mover.Claim(mover)
 	active[player] = state
 	publish(state)
 	return state
@@ -2746,13 +3261,14 @@ local function revive(state, ratio: number)
 	end
 	state.KO = false
 	state.Health = state.MaxHealth * ratio
+	state.Model.Parent = folder
 	local rootPart = ownerRoot(state.Player)
 	if rootPart then
-		local p = rootPart.Position + Vector3.new(3, 0, 3)
-		state.Root.CFrame = CFrame.new(p.X, GameConfig.GroundY + state.Hip, p.Z)
+		state.Pos = flat(rootPart.Position + Vector3.new(3, 0, 3))
 	end
-	state.Model.Parent = folder
-	Effects.Burst(state.Root.Position, Color3.fromRGB(120, 255, 140), 4, 0.5)
+	state.Vel = Vector3.zero
+	Mover.Teleport(state.Mover, Vector3.new(state.Pos.X, GameConfig.GroundY + state.Hip, state.Pos.Z), state.Facing)
+	Effects.Burst(state.Root.Position, Color3.fromRGB(120, 255, 140), 4, 0.5, "Revive")
 	publish(state)
 end
 
@@ -2767,7 +3283,7 @@ function CreatureService.DamageCreature(state, amount: number)
 		state.Target = nil
 		state.KOToken = (state.KOToken or 0) + 1
 		local token = state.KOToken
-		Effects.Burst(state.Root.Position, Color3.fromRGB(255, 255, 255), 4, 0.4)
+		Effects.Burst(state.Root.Position, Color3.fromRGB(255, 255, 255), 4, 0.4, "Knockout")
 		state.Model.Parent = nil
 		local name = CreatureData.GetDisplayName(state.Record)
 		Net.Notify(state.Player, ("💫 %s was knocked out! Feed it a berry (F) or wait %ds."):format(name, GameConfig.CreatureKORecoverTime), Color3.fromRGB(255, 170, 60))
@@ -2861,7 +3377,7 @@ local function evolve(player: Player, id: string)
 	if profile.Equipped == record.Id then
 		local state = active[player]
 		if state and not state.KO then
-			Effects.Burst(state.Root.Position, Color3.new(1, 1, 1), 10, 0.8)
+			Effects.Burst(state.Root.Position, Color3.new(1, 1, 1), 10, 0.8, "Evolve")
 		end
 		spawnFor(player, 1)
 	end
@@ -2923,15 +3439,17 @@ end
 local function performAttack(state, target)
 	local player = state.Player
 	local damage = state.Stats.Damage
+	local family = state.Record.Family
+	Animate.Play(state.Anim, "Attack")
 	if state.Family.Ranged then
 		local from = state.Root.Position + Vector3.new(0, state.Hip * 0.5, 0)
-		local travel = Effects.Projectile(from, target.Root.Position, state.Family.Accent, 90, 0.9 * state.Scale)
+		local travel = Effects.Projectile(from, target.Root.Position, state.Family.Accent, 90, 0.9 * state.Scale, "Projectile_" .. family)
 		task.delay(travel, function()
 			Registry.EnemyService.Damage(target, damage, player)
 		end)
 	else
 		local look = state.Root.CFrame.LookVector
-		Effects.Burst(state.Root.Position + look * (state.Radius + 1), state.Family.Accent, 1.5 * state.Scale, 0.2)
+		Effects.Burst(state.Root.Position + look * (state.Radius + 1), state.Family.Accent, 1.5 * state.Scale, 0.2, "Attack_" .. family)
 		Registry.EnemyService.Damage(target, damage, player)
 	end
 end
@@ -2947,10 +3465,12 @@ local function useAbility(player: Player)
 	end
 	local ability = state.Family.Ability
 	local damage = state.Stats.Damage * ability.DamageMult
+	local effectName = "Ability_" .. state.Record.Family
+	Animate.Play(state.Anim, "Ability")
 
 	if ability.Kind == "Burst" then
 		local center = state.Root.Position
-		Effects.Burst(center, state.Family.Accent, ability.Radius, 0.5)
+		Effects.Burst(center, state.Family.Accent, ability.Radius, 0.5, effectName)
 		for _, e in Registry.EnemyService.GetInRadius(center, ability.Radius) do
 			Registry.EnemyService.Damage(e, damage, player)
 		end
@@ -2982,8 +3502,12 @@ local function useAbility(player: Player)
 		local dir = Vector3.new(tp.X - from.X, 0, tp.Z - from.Z)
 		local landing = if dir.Magnitude > 0.1 then tp - dir.Unit * (target.Radius + state.Radius) else tp
 		Effects.Burst(from, state.Family.Accent, 3, 0.3)
-		state.Root.CFrame = CFrame.lookAt(Vector3.new(landing.X, GameConfig.GroundY + state.Hip, landing.Z), Vector3.new(tp.X, GameConfig.GroundY + state.Hip, tp.Z))
-		Effects.Burst(landing, state.Family.Accent, 5, 0.4)
+		-- Swoop: move the goal; the physics mover carries the creature there in a quick arc.
+		state.Pos = flat(landing)
+		state.Vel = Vector3.zero
+		state.Facing = if dir.Magnitude > 0.1 then dir.Unit else state.Facing
+		Mover.Set(state.Mover, Vector3.new(landing.X, GameConfig.GroundY + state.Hip + 2, landing.Z), state.Facing)
+		Effects.Burst(landing, state.Family.Accent, 5, 0.4, effectName)
 		Registry.EnemyService.Damage(target, damage, player)
 		state.Target = target
 	end
@@ -3012,50 +3536,70 @@ local function step(state, dt: number, now: number)
 		end
 	end
 
-	local pos = state.Root.Position
+	local pos: Vector3 = state.Pos
+	local ownerPos = flat(rootPart.Position)
 	local target = if Registry.EnemyService.IsAlive(state.Target) then state.Target else nil
-	local goal: Vector3
-	local face: Vector3
+	local goal: Vector3? = nil
+	local wantFace: Vector3? = nil
+
 	if target then
-		local tp = target.Root.Position
-		local toTarget = Vector3.new(tp.X - pos.X, 0, tp.Z - pos.Z)
+		local tp = flat(target.Root.Position)
+		local toTarget = tp - pos
 		local reach = state.Stats.Range + target.Radius
 		if toTarget.Magnitude > reach * 0.85 then
 			goal = tp - toTarget.Unit * reach * 0.7
-		else
-			goal = pos
 		end
-		face = tp
+		wantFace = toTarget
 	else
-		goal = (rootPart.CFrame * CFrame.new(3.5 + state.Radius, 0, 4 + state.Radius)).Position
-		face = goal + rootPart.CFrame.LookVector * 10
+		-- Follow like a pet: keep whatever side it's on, only walk when it drifts out of the comfort band.
+		local offset = pos - ownerPos
+		local d = offset.Magnitude
+		local side = if d > 0.1 then offset / d else -flat(rootPart.CFrame.LookVector)
+		if side.Magnitude < 0.01 then
+			side = Vector3.new(0, 0, 1)
+		end
+		local followDist = GameConfig.CreatureFollowDistance + state.Radius
+		if d > GameConfig.CreatureLeashDistance then
+			state.Pos = ownerPos + side.Unit * followDist
+			state.Vel = Vector3.zero
+			Mover.Teleport(state.Mover, Vector3.new(state.Pos.X, GameConfig.GroundY + state.Hip, state.Pos.Z), state.Facing)
+			return
+		elseif d > followDist + 2.5 then
+			goal = ownerPos + side.Unit * followDist
+		elseif d < followDist * 0.45 then
+			goal = ownerPos + side.Unit * followDist * 0.8
+		end
+		wantFace = ownerPos - pos
 	end
 
-	local delta = Vector3.new(goal.X - pos.X, 0, goal.Z - pos.Z)
-	local dist = delta.Magnitude
-	local newPos = pos
-	if dist > CreatureService.LeashTeleport then
-		newPos = Vector3.new(goal.X, pos.Y, goal.Z)
-	elseif dist > 0.3 then
-		local speed = GameConfig.CreatureMoveSpeed * (if dist > 20 then 1.6 else 1)
-		newPos = pos + delta.Unit * math.min(dist, speed * dt)
+	local desired = Vector3.zero
+	if goal then
+		local to = goal - pos
+		local dist = to.Magnitude
+		if dist > 0.4 then
+			local speed = GameConfig.CreatureMoveSpeed * (if dist > 20 then 1.7 else 1) * math.clamp(dist / 6, 0.35, 1)
+			desired = to / dist * speed
+		end
+	end
+	state.Vel = state.Vel:Lerp(desired, math.clamp(dt * GameConfig.CreatureAcceleration, 0, 1))
+	pos += state.Vel * dt
+	state.Pos = pos
+
+	local speed = state.Vel.Magnitude
+	local faceGoal = if speed > 3 then state.Vel else wantFace
+	if faceGoal and faceGoal.Magnitude > 0.1 then
+		local blended = state.Facing:Lerp(faceGoal.Unit, math.clamp(dt * 8, 0, 1))
+		state.Facing = if blended.Magnitude > 0.01 then blended.Unit else faceGoal.Unit
 	end
 
-	local moving = (newPos - pos).Magnitude > 0.01
-	state.Bob += dt * (if moving then 14 else 3)
-	local y = GameConfig.GroundY + state.Hip + math.abs(math.sin(state.Bob)) * 0.25 * state.Scale
-	local lookDir = Vector3.new(face.X - newPos.X, 0, face.Z - newPos.Z)
-	if lookDir.Magnitude < 0.1 then
-		lookDir = state.Root.CFrame.LookVector * Vector3.new(1, 0, 1)
-	end
-	if lookDir.Magnitude < 0.01 then
-		lookDir = Vector3.new(0, 0, -1)
-	end
-	local at = Vector3.new(newPos.X, y, newPos.Z)
-	state.Root.CFrame = CFrame.lookAt(at, at + lookDir)
+	local moving01 = math.clamp(speed / GameConfig.CreatureMoveSpeed, 0, 1)
+	state.Bob += dt * (4 + 10 * moving01)
+	local hop = math.abs(math.sin(state.Bob)) * 0.35 * state.Scale * moving01 + math.sin(now * 2.2) * 0.06 * state.Scale
+	Mover.Set(state.Mover, Vector3.new(pos.X, GameConfig.GroundY + state.Hip + hop, pos.Z), state.Facing)
+	Animate.SetMoving(state.Anim, speed > 2)
 
 	if target and now >= state.NextAttack then
-		local d = flatDist(state.Root.Position, target.Root.Position)
+		local d = flatDist(pos, target.Root.Position)
 		if d <= state.Stats.Range + target.Radius + 0.5 then
 			state.NextAttack = now + 1 / state.Stats.AttackRate
 			performAttack(state, target)
@@ -3072,7 +3616,6 @@ local function step(state, dt: number, now: number)
 	end
 end
 
-CreatureService.LeashTeleport = GameConfig.CreatureLeashDistance
 
 ---------------------------------------------------------------------------------------------------
 -- Lifecycle
@@ -3160,7 +3703,7 @@ function CreatureService.Start()
 			Net.Notify(player, "🍓 Your creature is back on its feet!", Color3.fromRGB(120, 255, 140))
 		else
 			heal(state, state.MaxHealth * GameConfig.FeedHealPercent)
-			Effects.Burst(state.Root.Position + Vector3.new(0, state.Hip, 0), Color3.fromRGB(255, 110, 150), 2, 0.4)
+			Effects.Burst(state.Root.Position + Vector3.new(0, state.Hip, 0), Color3.fromRGB(255, 110, 150), 2, 0.4, "Feed")
 			Effects.FloatText(state.Root.Position + Vector3.new(0, state.Hip + 2, 0), "+" .. GameConfig.FeedXP .. " XP", Color3.fromRGB(255, 150, 200))
 		end
 		CreatureService.AddXP(player, GameConfig.FeedXP)
@@ -4231,6 +4774,8 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Registry = require(script.Parent.Parent.Registry)
 local Effects = require(script.Parent.Parent.Modules.Effects)
+local Mover = require(script.Parent.Parent.Modules.Mover)
+local Animate = require(script.Parent.Parent.Modules.Animate)
 
 local Root = ReplicatedStorage:WaitForChild("HatchOrDie")
 local GameConfig = require(Root.Config.GameConfig)
@@ -4312,11 +4857,18 @@ end
 -- Spawning
 ---------------------------------------------------------------------------------------------------
 local function makeHealthBar(e)
+	local anchor = Instance.new("Attachment")
+	anchor.Name = "HealthBarAttachment"
+	anchor.Position = Vector3.new(0, e.Top + 0.6, 0)
+	anchor.Parent = e.Root
+
 	local gui = Instance.new("BillboardGui")
 	gui.Name = "HealthBar"
+	gui.Adornee = anchor
 	gui.Size = UDim2.fromOffset(90, 26)
-	gui.StudsOffset = Vector3.new(0, e.Top + 1.2, 0)
-	gui.MaxDistance = 120
+	gui.SizeOffset = Vector2.new(0, 0.5)
+	gui.AlwaysOnTop = true
+	gui.MaxDistance = 90
 	gui.LightInfluence = 0
 
 	if e.Variant.Prefix then
@@ -4344,7 +4896,7 @@ local function makeHealthBar(e)
 	fill.BackgroundColor3 = Color3.fromRGB(235, 60, 60)
 	fill.BorderSizePixel = 0
 	fill.Parent = back
-	gui.Parent = e.Root
+	gui.Parent = e.Model
 	return fill
 end
 
@@ -4364,6 +4916,7 @@ function EnemyService.Spawn(typeId: string, variantId: string?, position: Vector
 	local hip = model:GetAttribute("HipHeight") :: number
 	local top = model:GetAttribute("Top") :: number
 	root.CFrame = CFrame.new(position.X, GameConfig.GroundY + hip, position.Z)
+	local mover = Mover.Attach(model, GameConfig.EnemyResponsiveness)
 
 	local e = {
 		TypeId = typeId,
@@ -4387,16 +4940,26 @@ function EnemyService.Spawn(typeId: string, variantId: string?, position: Vector
 		Alive = true,
 		Busy = false,
 		DamageTakenMult = 1,
+		Mover = mover,
+		Pos = Vector3.new(position.X, 0, position.Z),
+		Vel = Vector3.zero,
+		Facing = Vector3.new(-position.X, 0, -position.Z).Unit,
+		Bob = 0,
+		Anim = Animate.Setup(model),
 	}
+	if e.Facing.X ~= e.Facing.X then
+		e.Facing = Vector3.new(0, 0, -1)
+	end
 	e.Health = e.MaxHealth
 	if not data.IsBoss then
 		e.Bar = makeHealthBar(e)
 	end
 
 	model.Parent = folder
+	Mover.Teleport(mover, root.Position, e.Facing)
 	table.insert(enemies, e)
 	byModel[model] = e
-	Effects.Burst(root.Position, Color3.fromRGB(90, 0, 130), 3, 0.4)
+	Effects.Burst(root.Position, Color3.fromRGB(90, 0, 130), 3, 0.4, if data.IsBoss then "BossSpawn" else "EnemySpawn")
 	return e
 end
 
@@ -4417,7 +4980,7 @@ local function kill(e, killer: Player?)
 	end
 	e.Alive = false
 	removeFromList(e)
-	Effects.Burst(e.Root.Position, e.Data.EyeColor, e.Radius * 2, 0.4)
+	Effects.Burst(e.Root.Position, e.Data.EyeColor, e.Radius * 2, 0.4, if e.Data.IsBoss then "BossDeath" else "EnemyDeath")
 	Effects.FadeOut(e.Model, 0.4)
 
 	if killer and killer.Parent then
@@ -4448,8 +5011,11 @@ function EnemyService.Damage(e, amount: number, source: Player?)
 	end
 	local color = if e.DamageTakenMult > 1 then Color3.fromRGB(255, 230, 60) else Color3.new(1, 1, 1)
 	Effects.DamageNumber(e.Root.Position + Vector3.new(0, e.Top + 1, 0), dealt, color)
+	Effects.Custom("Hit", e.Root.Position)
 	if e.Bar then
-		e.Bar.Size = UDim2.fromScale(math.clamp(e.Health / e.MaxHealth, 0, 1), 1)
+		local ratio = math.clamp(e.Health / e.MaxHealth, 0, 1)
+		e.Bar.Size = UDim2.fromScale(ratio, 1)
+		e.Bar.Visible = ratio > 0.001
 	end
 	if e.OnDamaged then
 		e.OnDamaged(e)
@@ -4539,7 +5105,8 @@ local function attack(e, target, now: number)
 			end
 			local from = if eye then eye.Position else e.Root.Position + Vector3.new(0, 2, 0)
 			local aim = target.Root.Position
-			local travel = Effects.Projectile(from, aim, data.EyeColor, data.ProjectileSpeed, 1.2)
+			Animate.Play(e.Anim, "Attack")
+			local travel = Effects.Projectile(from, aim, data.EyeColor, data.ProjectileSpeed, 1.2, "Projectile_" .. e.TypeId)
 			task.delay(travel, function()
 				if EnemyService.IsTargetValid(target) and flatDist(target.Root.Position, aim) < 5 then
 					EnemyService.ApplyDamage(target, e.Damage)
@@ -4549,14 +5116,15 @@ local function attack(e, target, now: number)
 	elseif data.Windup > 0 then
 		e.Busy = true
 		local radius = data.SmashRadius or 6
-		local center = e.Root.Position + e.Root.CFrame.LookVector * (e.Radius + radius * 0.4)
+		local center = e.Root.Position + e.Facing * (e.Radius + radius * 0.4)
 		Effects.Telegraph(center, "Disc", Vector2.new(radius, 0), data.Windup)
 		task.delay(data.Windup, function()
 			e.Busy = false
 			if not e.Alive then
 				return
 			end
-			Effects.Burst(Vector3.new(center.X, 1, center.Z), Color3.fromRGB(160, 110, 80), radius, 0.35)
+			Animate.Play(e.Anim, "Attack")
+			Effects.Burst(Vector3.new(center.X, 1, center.Z), Color3.fromRGB(160, 110, 80), radius, 0.35, "Smash_" .. e.TypeId)
 			for _, t in EnemyService.GatherTargets() do
 				if flatDist(t.Root.Position, center) <= radius + EnemyService.TargetRadius(t) then
 					EnemyService.ApplyDamage(t, e.Damage)
@@ -4564,8 +5132,27 @@ local function attack(e, target, now: number)
 			end
 		end)
 	else
+		Animate.Play(e.Anim, "Attack")
+		Effects.Custom("Attack_" .. e.TypeId, target.Root.Position, e.Facing)
 		EnemyService.ApplyDamage(target, e.Damage)
 	end
+end
+
+-- Smooth steering shared by all enemies (and the boss): accelerate toward a velocity, turn gradually.
+function EnemyService.Steer(e, desiredVelocity: Vector3, face: Vector3?, dt: number)
+	e.Vel = e.Vel:Lerp(desiredVelocity, math.clamp(dt * 6, 0, 1))
+	e.Pos += e.Vel * dt
+	if face and face.Magnitude > 0.01 then
+		local blended = e.Facing:Lerp(Vector3.new(face.X, 0, face.Z).Unit, math.clamp(dt * 7, 0, 1))
+		if blended.Magnitude > 0.01 then
+			e.Facing = blended.Unit
+		end
+	end
+	local speed = e.Vel.Magnitude
+	e.Bob += dt * speed * 0.9
+	local bob = if speed > 1 then math.abs(math.sin(e.Bob)) * 0.25 else 0
+	Mover.Set(e.Mover, Vector3.new(e.Pos.X, GameConfig.GroundY + e.Hip + bob, e.Pos.Z), e.Facing)
+	Animate.SetMoving(e.Anim, speed > 1)
 end
 
 local function stepEnemy(e, dt: number, now: number, targets)
@@ -4580,11 +5167,11 @@ local function stepEnemy(e, dt: number, now: number, targets)
 	end
 
 	local data = e.Data
-	local pos = e.Root.Position
+	local pos = e.Pos
 	local goal = if target then target.Root.Position else campPosition
 	local toGoal = Vector3.new(goal.X - pos.X, 0, goal.Z - pos.Z)
 	local dist = toGoal.Magnitude
-	local dir = if dist > 0.01 then toGoal / dist else e.Root.CFrame.LookVector
+	local dir = if dist > 0.01 then toGoal / dist else e.Facing
 	local targetRadius = if target then EnemyService.TargetRadius(target) else 0
 
 	local move = Vector3.zero
@@ -4598,17 +5185,11 @@ local function stepEnemy(e, dt: number, now: number, targets)
 		else
 			local stopAt = if target then data.AttackRange * 0.8 + targetRadius + e.Radius * 0.5 else 8
 			if dist > stopAt then
-				move = dir
+				move = dir * math.clamp((dist - stopAt) / 4, 0.3, 1)
 			end
 		end
 	end
-
-	local newPos = pos + move * e.Speed * dt
-	local look = Vector3.new(dir.X, 0, dir.Z)
-	if look.Magnitude < 0.01 then
-		look = Vector3.new(0, 0, -1)
-	end
-	e.Root.CFrame = CFrame.lookAt(newPos, newPos + look)
+	EnemyService.Steer(e, move * e.Speed, dir, dt)
 
 	if target and not e.Busy and now >= e.NextAttack and dist <= data.AttackRange + targetRadius + e.Radius * 0.5 then
 		attack(e, target, now)
@@ -5763,7 +6344,9 @@ local function bind(gui: ScreenGui)
 	for _, name in { "Announcement", "BigTitle", "BigSub" } do
 		refs[name].TextTransparency = 1
 		refs[name].TextStrokeTransparency = 1
+		refs[name].Visible = false
 	end
+	refs.AbilityCooldown.Visible = false
 end
 
 ---------------------------------------------------------------------------------------------------
@@ -5817,6 +6400,7 @@ function Hud.Announce(text: string, color: Color3?, big: boolean?)
 	label.Text = text
 	label.TextColor3 = color or C.Gold
 	label.Size = if big then UIKit.scaleUDim2(baseSizes.Announcement, 1.35) else baseSizes.Announcement
+	label.Visible = true
 	label.TextTransparency = 0
 	label.TextStrokeTransparency = 0.1
 	if big then
@@ -5879,7 +6463,7 @@ function Hud.ShowNightResult(result)
 	refs.NightResult.Size = UIKit.scaleUDim2(baseSizes.NightResult, 0.8)
 	UIKit.tween(refs.NightResult, 0.35, { Size = baseSizes.NightResult }, Enum.EasingStyle.Back)
 	task.delay(5, function()
-		refs.NightResult.Visible = false
+		UIKit.tween(refs.NightResult, 0.25, { Size = UDim2.new() }, Enum.EasingStyle.Back, Enum.EasingDirection.In)
 	end)
 end
 
@@ -5889,7 +6473,7 @@ function Hud.SetBoss(data)
 	if data then
 		refs.BossName.Text = data.Name .. (if data.Enraged then "  🔥 ENRAGED" else "") .. (if data.Exposed then "  💥 CORE EXPOSED" else "")
 		refs.BossFill.BackgroundColor3 = if data.Exposed then Color3.fromRGB(255, 220, 60) else Color3.fromRGB(220, 50, 50)
-		UIKit.tween(refs.BossFill, 0.15, { Size = UDim2.fromScale(math.clamp(data.Health / data.MaxHealth, 0, 1), 1) })
+		UIKit.setFill(refs.BossFill, data.Health / data.MaxHealth, 0.15)
 	end
 end
 
@@ -5976,10 +6560,10 @@ function Hud.RefreshProfile()
 		local stage = CD.Stages[record.Stage]
 		refs.CreatureStage.Text = ("%s • %s • Stage %d/%d"):format(rarity, stage.Name, record.Stage, #CD.Stages)
 		if stage.XPToEvolve then
-			refs.CreatureXPFill.Size = UDim2.fromScale(math.clamp(record.XP / stage.XPToEvolve, 0, 1), 1)
+			UIKit.setFill(refs.CreatureXPFill, record.XP / stage.XPToEvolve)
 			refs.CreatureXPText.Text = ("XP %d/%d • Nights %d/%d"):format(record.XP, stage.XPToEvolve, record.StageNights, stage.NightsToEvolve)
 		else
-			refs.CreatureXPFill.Size = UDim2.fromScale(1, 1)
+			UIKit.setFill(refs.CreatureXPFill, 1)
 			refs.CreatureXPText.Text = "MAX STAGE • " .. record.Nights .. " nights survived"
 		end
 		refs.EvolveButton.Visible = CD.CanEvolve(record)
@@ -5991,7 +6575,7 @@ local function refreshCreatureAttributes()
 	local hp = player:GetAttribute("CreatureHP") or 0
 	local maxHp = player:GetAttribute("CreatureMaxHP") or 1
 	local ko = player:GetAttribute("CreatureKO")
-	refs.CreatureHPFill.Size = UDim2.fromScale(math.clamp(hp / maxHp, 0, 1), 1)
+	UIKit.setFill(refs.CreatureHPFill, if ko then 0 else hp / maxHp)
 	refs.CreatureHPFill.BackgroundColor3 = if ko then C.Bad elseif hp / maxHp < 0.35 then Color3.fromRGB(255, 170, 60) else C.Good
 	refs.CreatureHPText.Text = if ko then "KNOCKED OUT" else ("%d / %d"):format(hp, maxHp)
 	local mode = player:GetAttribute("CreatureMode") or "Attack"
@@ -6051,10 +6635,13 @@ local function tick()
 	local record = equippedRecord(ctx.Profile)
 	local ability = record and ctx.CreatureData.Families[record.Family].Ability
 	if ability then
-		refs.AbilityCooldown.Size = UDim2.fromScale(1, math.clamp(cooldown / ability.Cooldown, 0, 1))
+		local left = math.clamp(cooldown / ability.Cooldown, 0, 1)
+		refs.AbilityCooldown.Size = UDim2.fromScale(1, left)
+		refs.AbilityCooldown.Visible = left > 0.001
 		refs.AbilityButton.Text = if cooldown > 0 then ("%s\n%ds"):format(ability.Name, math.ceil(cooldown)) else ability.Name .. "\n[Q]"
 	else
 		refs.AbilityCooldown.Size = UDim2.fromScale(1, 0)
+		refs.AbilityCooldown.Visible = false
 		refs.AbilityButton.Text = "ABILITY\n[Q]"
 	end
 	refs.FeedButton.Text = ("🍓 FEED [F]\nx%d"):format(if ctx.Profile then ctx.Profile.Berries else 0)
@@ -6067,7 +6654,7 @@ local function tick()
 		local total = math.max(0.1, incubator.EndsAt - incubator.StartedAt)
 		local left = incubator.EndsAt - serverNow()
 		refs.IncubatorText.Text = ("🥚 %s hatching... %s"):format(if egg then egg.Name else "Egg", UIKit.formatTime(left + 0.99))
-		refs.IncubatorFill.Size = UDim2.fromScale(math.clamp(1 - left / total, 0, 1), 1)
+		UIKit.setFill(refs.IncubatorFill, 1 - left / total)
 	end
 end
 
@@ -6786,8 +7373,8 @@ end
 
 function Panels.Close()
 	current = nil
-	window.Visible = false
 	clear()
+	UIKit.tween(window, 0.15, { Size = UDim2.new() }, Enum.EasingStyle.Quad, Enum.EasingDirection.In)
 end
 
 function Panels.Toggle(name: string)
@@ -7002,10 +7589,94 @@ function UIKit.bar(props: { [string]: any }, fillColor: Color3): (Frame, Frame)
 	return back, fill
 end
 
+local function isZeroSize(size: any): boolean
+	return typeof(size) == "UDim2" and ((size.X.Scale == 0 and size.X.Offset <= 0) or (size.Y.Scale == 0 and size.Y.Offset <= 0))
+end
+
+local function hasVisibleChildren(inst: Instance): boolean
+	for _, child in inst:GetChildren() do
+		if child:IsA("GuiObject") and child.Visible then
+			return true
+		end
+	end
+	return false
+end
+
+-- True if, after these props are applied, the element draws nothing at all.
+local function becomesInvisible(inst: GuiObject, props: { [string]: any }): boolean
+	if props.Size ~= nil and isZeroSize(props.Size) then
+		return true
+	end
+	if props.GroupTransparency ~= nil and props.GroupTransparency >= 1 then
+		return true
+	end
+	local function final(key: string): number?
+		local v = props[key]
+		if v == nil then
+			local ok, current = pcall(function()
+				return (inst :: any)[key]
+			end)
+			v = if ok then current else nil
+		end
+		return v
+	end
+	local touched = props.BackgroundTransparency ~= nil or props.TextTransparency ~= nil or props.ImageTransparency ~= nil
+	if not touched then
+		return false
+	end
+	if (final("BackgroundTransparency") or 1) < 1 then
+		return false
+	end
+	if (inst:IsA("TextLabel") or inst:IsA("TextButton") or inst:IsA("TextBox")) and (final("TextTransparency") or 1) < 1 then
+		return false
+	end
+	if (inst:IsA("ImageLabel") or inst:IsA("ImageButton")) and (final("ImageTransparency") or 1) < 1 then
+		return false
+	end
+	return not hasVisibleChildren(inst)
+end
+
+-- Tween that also manages Visible: anything tweened to nothing (zero size or fully transparent)
+-- ends with Visible = false, and anything tweened back into view is made Visible first.
 function UIKit.tween(inst: Instance, time: number, props: { [string]: any }, style: Enum.EasingStyle?, direction: Enum.EasingDirection?): Tween
 	local tween = TweenService:Create(inst, TweenInfo.new(time, style or Enum.EasingStyle.Quad, direction or Enum.EasingDirection.Out), props)
+	if inst:IsA("GuiObject") then
+		local hides = becomesInvisible(inst, props)
+		if not hides then
+			local showsSomething = (props.Size ~= nil and not isZeroSize(props.Size))
+				or (props.BackgroundTransparency ~= nil and props.BackgroundTransparency < 1)
+				or (props.TextTransparency ~= nil and props.TextTransparency < 1)
+				or (props.ImageTransparency ~= nil and props.ImageTransparency < 1)
+				or (props.GroupTransparency ~= nil and props.GroupTransparency < 1)
+			if showsSomething then
+				inst.Visible = true
+			end
+		else
+			tween.Completed:Connect(function(state)
+				if state == Enum.PlaybackState.Completed and becomesInvisible(inst, props) then
+					inst.Visible = false
+				end
+			end)
+		end
+	end
 	tween:Play()
 	return tween
+end
+
+-- Progress bars: sets the fill width and hides it at zero (a rounded 0-width frame still shows a dot).
+function UIKit.setFill(fill: GuiObject, ratio: number, tweenTime: number?)
+	local r = math.clamp(ratio, 0, 1)
+	local size = UDim2.new(r, 0, fill.Size.Y.Scale, fill.Size.Y.Offset)
+	if r <= 0.001 then
+		fill.Size = size
+		fill.Visible = false
+	elseif tweenTime then
+		fill.Visible = true
+		UIKit.tween(fill, tweenTime, { Size = size })
+	else
+		fill.Visible = true
+		fill.Size = size
+	end
 end
 
 function UIKit.formatTime(seconds: number): string

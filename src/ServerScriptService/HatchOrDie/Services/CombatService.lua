@@ -26,7 +26,7 @@ local function swing(player: Player)
 	local look = rootPart.CFrame.LookVector
 	local flatLook = Vector3.new(look.X, 0, look.Z).Unit
 	local origin = rootPart.Position
-	Effects.Burst(origin + flatLook * 4, Color3.fromRGB(255, 160, 50), 2.5, 0.2)
+	Effects.Burst(origin + flatLook * 4, Color3.fromRGB(255, 160, 50), 2.5, 0.2, "TorchSwing")
 
 	local damage = torchDamage()
 	for _, e in Registry.EnemyService.GetInRadius(origin, GameConfig.TorchRange + 2) do

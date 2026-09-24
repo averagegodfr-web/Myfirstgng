@@ -97,7 +97,9 @@ local function bind(gui: ScreenGui)
 	for _, name in { "Announcement", "BigTitle", "BigSub" } do
 		refs[name].TextTransparency = 1
 		refs[name].TextStrokeTransparency = 1
+		refs[name].Visible = false
 	end
+	refs.AbilityCooldown.Visible = false
 end
 
 ---------------------------------------------------------------------------------------------------
@@ -151,6 +153,7 @@ function Hud.Announce(text: string, color: Color3?, big: boolean?)
 	label.Text = text
 	label.TextColor3 = color or C.Gold
 	label.Size = if big then UIKit.scaleUDim2(baseSizes.Announcement, 1.35) else baseSizes.Announcement
+	label.Visible = true
 	label.TextTransparency = 0
 	label.TextStrokeTransparency = 0.1
 	if big then
@@ -213,7 +216,7 @@ function Hud.ShowNightResult(result)
 	refs.NightResult.Size = UIKit.scaleUDim2(baseSizes.NightResult, 0.8)
 	UIKit.tween(refs.NightResult, 0.35, { Size = baseSizes.NightResult }, Enum.EasingStyle.Back)
 	task.delay(5, function()
-		refs.NightResult.Visible = false
+		UIKit.tween(refs.NightResult, 0.25, { Size = UDim2.new() }, Enum.EasingStyle.Back, Enum.EasingDirection.In)
 	end)
 end
 
@@ -223,7 +226,7 @@ function Hud.SetBoss(data)
 	if data then
 		refs.BossName.Text = data.Name .. (if data.Enraged then "  🔥 ENRAGED" else "") .. (if data.Exposed then "  💥 CORE EXPOSED" else "")
 		refs.BossFill.BackgroundColor3 = if data.Exposed then Color3.fromRGB(255, 220, 60) else Color3.fromRGB(220, 50, 50)
-		UIKit.tween(refs.BossFill, 0.15, { Size = UDim2.fromScale(math.clamp(data.Health / data.MaxHealth, 0, 1), 1) })
+		UIKit.setFill(refs.BossFill, data.Health / data.MaxHealth, 0.15)
 	end
 end
 
@@ -310,10 +313,10 @@ function Hud.RefreshProfile()
 		local stage = CD.Stages[record.Stage]
 		refs.CreatureStage.Text = ("%s • %s • Stage %d/%d"):format(rarity, stage.Name, record.Stage, #CD.Stages)
 		if stage.XPToEvolve then
-			refs.CreatureXPFill.Size = UDim2.fromScale(math.clamp(record.XP / stage.XPToEvolve, 0, 1), 1)
+			UIKit.setFill(refs.CreatureXPFill, record.XP / stage.XPToEvolve)
 			refs.CreatureXPText.Text = ("XP %d/%d • Nights %d/%d"):format(record.XP, stage.XPToEvolve, record.StageNights, stage.NightsToEvolve)
 		else
-			refs.CreatureXPFill.Size = UDim2.fromScale(1, 1)
+			UIKit.setFill(refs.CreatureXPFill, 1)
 			refs.CreatureXPText.Text = "MAX STAGE • " .. record.Nights .. " nights survived"
 		end
 		refs.EvolveButton.Visible = CD.CanEvolve(record)
@@ -325,7 +328,7 @@ local function refreshCreatureAttributes()
 	local hp = player:GetAttribute("CreatureHP") or 0
 	local maxHp = player:GetAttribute("CreatureMaxHP") or 1
 	local ko = player:GetAttribute("CreatureKO")
-	refs.CreatureHPFill.Size = UDim2.fromScale(math.clamp(hp / maxHp, 0, 1), 1)
+	UIKit.setFill(refs.CreatureHPFill, if ko then 0 else hp / maxHp)
 	refs.CreatureHPFill.BackgroundColor3 = if ko then C.Bad elseif hp / maxHp < 0.35 then Color3.fromRGB(255, 170, 60) else C.Good
 	refs.CreatureHPText.Text = if ko then "KNOCKED OUT" else ("%d / %d"):format(hp, maxHp)
 	local mode = player:GetAttribute("CreatureMode") or "Attack"
@@ -385,10 +388,13 @@ local function tick()
 	local record = equippedRecord(ctx.Profile)
 	local ability = record and ctx.CreatureData.Families[record.Family].Ability
 	if ability then
-		refs.AbilityCooldown.Size = UDim2.fromScale(1, math.clamp(cooldown / ability.Cooldown, 0, 1))
+		local left = math.clamp(cooldown / ability.Cooldown, 0, 1)
+		refs.AbilityCooldown.Size = UDim2.fromScale(1, left)
+		refs.AbilityCooldown.Visible = left > 0.001
 		refs.AbilityButton.Text = if cooldown > 0 then ("%s\n%ds"):format(ability.Name, math.ceil(cooldown)) else ability.Name .. "\n[Q]"
 	else
 		refs.AbilityCooldown.Size = UDim2.fromScale(1, 0)
+		refs.AbilityCooldown.Visible = false
 		refs.AbilityButton.Text = "ABILITY\n[Q]"
 	end
 	refs.FeedButton.Text = ("🍓 FEED [F]\nx%d"):format(if ctx.Profile then ctx.Profile.Berries else 0)
@@ -401,7 +407,7 @@ local function tick()
 		local total = math.max(0.1, incubator.EndsAt - incubator.StartedAt)
 		local left = incubator.EndsAt - serverNow()
 		refs.IncubatorText.Text = ("🥚 %s hatching... %s"):format(if egg then egg.Name else "Egg", UIKit.formatTime(left + 0.99))
-		refs.IncubatorFill.Size = UDim2.fromScale(math.clamp(1 - left / total, 0, 1), 1)
+		UIKit.setFill(refs.IncubatorFill, 1 - left / total)
 	end
 end
 

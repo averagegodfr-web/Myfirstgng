@@ -18,7 +18,11 @@ local GameConfig = {
 	-- Creatures
 	BaseCreatureSlots = 15,
 	ExtraSlotsBonus = 25,
-	CreatureMoveSpeed = 26,
+	CreatureMoveSpeed = 24,
+	CreatureFollowDistance = 5, -- studs from the player it likes to stay at
+	CreatureAcceleration = 7, -- higher = snappier starts/stops
+	CreatureResponsiveness = 30, -- physics smoothing (higher = tighter, lower = floatier)
+	EnemyResponsiveness = 25,
 	CreatureLeashDistance = 70,
 	CreatureAggroRadius = 40,
 	CreatureDefendRadius = 16,

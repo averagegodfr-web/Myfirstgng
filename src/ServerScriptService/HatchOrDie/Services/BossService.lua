@@ -74,7 +74,7 @@ local function slam(e)
 		if not e.Alive then
 			return
 		end
-		Effects.Burst(Vector3.new(center.X, 1, center.Z), Color3.fromRGB(120, 90, 60), SLAM_RADIUS, 0.5)
+		Effects.Burst(Vector3.new(center.X, 1, center.Z), Color3.fromRGB(120, 90, 60), SLAM_RADIUS, 0.5, "BossSlam")
 		shake(1)
 		for _, t in Registry.EnemyService.GatherTargets() do
 			if flatDist(t.Root.Position, center) <= SLAM_RADIUS + Registry.EnemyService.TargetRadius(t) then
@@ -109,7 +109,7 @@ local function rootLine(e, target)
 	local windup = if e.Enraged then 0.9 else 1.1
 	local origin = e.Root.Position
 	local toTarget = Vector3.new(target.Root.Position.X - origin.X, 0, target.Root.Position.Z - origin.Z)
-	local dir = if toTarget.Magnitude > 0.1 then toTarget.Unit else e.Root.CFrame.LookVector
+	local dir = if toTarget.Magnitude > 0.1 then toTarget.Unit else e.Facing
 	Effects.Telegraph(origin + dir * (LINE_LENGTH / 2), "Rect", Vector2.new(LINE_WIDTH, LINE_LENGTH), windup, dir)
 	task.delay(windup, function()
 		if not e.Alive then
@@ -170,6 +170,7 @@ end
 
 local function tick(e, dt: number, now: number, targets)
 	if e.Busy then
+		Registry.EnemyService.Steer(e, Vector3.zero, nil, dt)
 		return
 	end
 	if now >= (e.NextRetarget or 0) then
@@ -185,17 +186,13 @@ local function tick(e, dt: number, now: number, targets)
 	end
 
 	local target = if e.Target and Registry.EnemyService.IsTargetValid(e.Target) then e.Target else nil
-	local pos = e.Root.Position
+	local pos = e.Pos
 	local goal = if target then target.Root.Position else arenaCenter
 	local toGoal = Vector3.new(goal.X - pos.X, 0, goal.Z - pos.Z)
 	local dist = toGoal.Magnitude
-	local dir = if dist > 0.1 then toGoal / dist else e.Root.CFrame.LookVector
-
-	local newPos = pos
-	if dist > 12 then
-		newPos = pos + dir * e.Speed * dt
-	end
-	e.Root.CFrame = CFrame.lookAt(newPos, newPos + Vector3.new(dir.X, 0, dir.Z))
+	local dir = if dist > 0.1 then toGoal / dist else e.Facing
+	local move = if dist > 12 then dir * e.Speed * math.clamp((dist - 12) / 6, 0.3, 1) else Vector3.zero
+	Registry.EnemyService.Steer(e, move, dir, dt)
 
 	if target and now >= e.NextAttack then
 		if dist <= SLAM_RADIUS + 2 then
@@ -210,7 +207,7 @@ local function onDeath(e, killer: Player?)
 	boss = nil
 	pushBar(true)
 	shake(1.5)
-	Effects.Burst(e.Root.Position, Color3.fromRGB(150, 255, 90), 30, 1.2)
+	Effects.Burst(e.Root.Position, Color3.fromRGB(150, 255, 90), 30, 1.2, "BossDeath")
 	local who = if killer then (" " .. killer.DisplayName .. " landed the final blow!") else ""
 	Net.Announce("🏆 THE ROTWOOD COLOSSUS HAS FALLEN!" .. who, Color3.fromRGB(255, 215, 60), true)
 

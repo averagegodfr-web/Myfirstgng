@@ -194,6 +194,34 @@ check(#profile.Creatures == 1, "first creature hatched within ~12s")
 check(profile.Equipped ~= nil, "first creature auto-equipped")
 check((clientEvents.HatchResult or 0) == 1, "client received hatch reveal")
 check(#sim.workspace.Creatures:GetChildren() == 1, "creature model in world")
+
+print("== Pet follows like a pet")
+do
+	local roblox = require("@lune/roblox")
+	local function flatDist(a, b)
+		return roblox.Vector3.new(a.X - b.X, 0, a.Z - b.Z).Magnitude
+	end
+	local petModel = sim.workspace.Creatures:GetChildren()[1]
+	local petRoot = petModel.PrimaryPart
+	local hrp = clientPlayer.Character.HumanoidRootPart
+	sim.run(3)
+	local settled = petRoot.Position
+	check(flatDist(settled, hrp.Position) < 10, ("pet settles near the player (%.1f studs)"):format(flatDist(settled, hrp.Position)))
+	hrp.CFrame = hrp.CFrame * roblox.CFrame.Angles(0, math.pi, 0)
+	sim.run(1)
+	check(flatDist(petRoot.Position, settled) < 1, "pet stays put when the player only turns around (no HRP-glued swinging)")
+	hrp.CFrame = hrp.CFrame + roblox.Vector3.new(40, 0, 0)
+	sim.run(0.2)
+	local early = flatDist(petRoot.Position, settled)
+	check(early < 6, ("pet accelerates instead of teleporting (%.1f studs after 0.2s)"):format(early))
+	sim.run(4)
+	check(flatDist(petRoot.Position, hrp.Position) < 12, ("pet catches up after the player walks away (%.1f studs)"):format(flatDist(petRoot.Position, hrp.Position)))
+	local plate = petModel:FindFirstChild("Nameplate")
+	check(plate and plate.AlwaysOnTop and plate.Adornee and plate.Adornee.Name == "NameplateAttachment", "nameplate sits on an attachment above the model and draws on top")
+	check(petRoot.Anchored == false and petRoot:FindFirstChildOfClass("AlignPosition") ~= nil, "pet moves with physics movers (smooth replication)")
+	hrp.CFrame = roblox.CFrame.new(0, 3, 16)
+	sim.run(3)
+end
 check(RS.HatchOrDie:GetAttribute("Phase") == "Day", "phase is Day")
 
 -- Give the player a torch and make them sturdy so we can observe full nights.
@@ -237,7 +265,12 @@ sim.run(45)
 check(RS.HatchOrDie:GetAttribute("Phase") == "Night", "night falls after the day timer")
 swingFor(20)
 check(#sim.workspace.Enemies:GetChildren() > 0 or profile.Stats.Kills > 0, "enemies spawned at night")
-swingFor(75)
+for _ = 1, 300 do
+	if RS.HatchOrDie:GetAttribute("Phase") == "Day" and RS.HatchOrDie:GetAttribute("Night") == 2 then
+		break
+	end
+	swingFor(0.5)
+end
 check(RS.HatchOrDie:GetAttribute("Phase") == "Day" and RS.HatchOrDie:GetAttribute("Night") == 2, "survived to Day 2")
 check(profile.HighestNight == 1, "HighestNight recorded")
 check(profile.Stats.Kills > 0, ("kills recorded (%d)"):format(profile.Stats.Kills))
@@ -401,6 +434,51 @@ do
 	end
 	check(toasts > 0, "designer's ToastTemplate used for notifications")
 	check(#sim.errors == before, "designer UI runs without errors")
+end
+
+print("== Custom assets")
+do
+	local before = #sim.errors
+	runSource(fs.readFile("installer/06_ExportAssets.lua"), "06_ExportAssets.lua", nil)
+	sim.run(0.1)
+	local assets = RS:FindFirstChild("HatchOrDieAssets")
+	check(#sim.errors == before and assets ~= nil, "asset export runs")
+	check(assets.Creatures.Sprout:FindFirstChild("Adult") and assets.Enemies:FindFirstChild("RotwoodColossus") and assets.Eggs:FindFirstChild("VoidEgg") and assets.EffectExamples:FindFirstChild("Hit"), "creatures, enemies, eggs and effect examples exported")
+	-- Activate one effect and use a custom creature model (a user's single model for every stage).
+	assets.EffectExamples.Hit.Parent = assets.Effects
+	local custom = sim.Instance.new("Model")
+	custom.Name = "Shade"
+	local body = sim.Instance.new("Part", custom)
+	body.Size = require("@lune/roblox").Vector3.new(3, 2, 4)
+	custom.PrimaryPart = body
+	assets.Creatures.Shade:Destroy()
+	custom.Parent = assets.Creatures
+	local Models = serverRequire(RS.HatchOrDie.Shared.Models)
+	for _, family in { "Sprout", "Ember", "Shade" } do
+		for stage = 1, 3 do
+			local m = Models.BuildCreature({ Family = family, Stage = stage, Mutation = "Storm", Aura = "Fire" })
+			assert(m:GetAttribute("Custom") and m.PrimaryPart.Name == "Root" and m:GetAttribute("HipHeight") > 0)
+		end
+	end
+	for typeId in serverRequire(RS.HatchOrDie.Config.EnemyData).Types do
+		assert(Models.BuildEnemy(typeId, "Elite"):GetAttribute("Custom"))
+	end
+	check(#sim.errors == before, "every creature/enemy builds from the exported assets")
+	Registry.CreatureService.Refresh(clientPlayer)
+	sim.run(1)
+	local petModel
+	for _, m in sim.workspace.Creatures:GetChildren() do
+		if m:GetAttribute("OwnerId") == clientPlayer.UserId then
+			petModel = m
+		end
+	end
+	check(petModel and petModel:GetAttribute("Custom"), "live creature rebuilt from the custom model")
+	local e = Registry.EnemyService.Spawn("Crawler", "Normal", clientPlayer.Character.HumanoidRootPart.Position + require("@lune/roblox").Vector3.new(30, 0, 0), nil)
+	sim.run(0.5)
+	Registry.EnemyService.Damage(e, 1, clientPlayer)
+	check(sim.workspace.Effects:FindFirstChild("Hit") ~= nil, "designer 'Hit' effect plays when an enemy is hit")
+	sim.run(20)
+	check(#sim.errors == before, "game keeps running on custom assets")
 end
 
 print("== Shutdown save")

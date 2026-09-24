@@ -59,11 +59,30 @@ function M.now()
 end
 
 local heartbeatSignal
+M.aligners = {}
+local function simulatePhysics()
+	-- AlignPosition/AlignOrientation: snap the attached part to the goal (good enough for logic tests).
+	for i = #M.aligners, 1, -1 do
+		local ap = M.aligners[i]
+		if rawget(ap, "__destroyed") then
+			table.remove(M.aligners, i)
+		else
+			local att = ap.Attachment0
+			local part = att and att.Parent
+			if part and ap.Position and part.Parent then
+				local ao = part:FindFirstChildOfClass("AlignOrientation")
+				local rot = if ao and ao.CFrame then ao.CFrame - ao.CFrame.Position else part.CFrame - part.CFrame.Position
+				part.CFrame = roblox.CFrame.new(ap.Position) * rot
+			end
+		end
+	end
+end
 function M.step(dt)
 	now += dt
 	if heartbeatSignal then
 		heartbeatSignal:Fire(dt)
 	end
+	simulatePhysics()
 	while true do
 		table.sort(queue, function(a, b)
 			if a.time == b.time then
@@ -439,6 +458,13 @@ function methods:TakeDamage(amount)
 	self.Health = math.max(0, self.Health - amount)
 end
 function methods:MoveTo() end
+function methods:SetNetworkOwner() end
+function methods:GetScale()
+	return 1
+end
+function methods:LoadAnimation()
+	return { Play = function() end, Stop = function() end }
+end
 -- Sound / Tween-ish no-ops
 function methods:Play() end
 function methods:Stop() end
@@ -617,6 +643,9 @@ function Instance.new(className, parent)
 		end
 	end
 	allInstances[obj] = true
+	if className == "AlignPosition" then
+		table.insert(M.aligners, obj)
+	end
 	if parent then
 		obj.Parent = parent
 	end
@@ -689,14 +718,18 @@ end
 
 local TweenService = service("TweenService")
 function methods:Create(inst, _info, props)
+	local completed = Signal.new()
 	return {
 		Play = function()
 			for k, v in props do
 				inst[k] = v
 			end
+			task.defer(function()
+				completed:Fire(roblox.Enum.PlaybackState.Completed)
+			end)
 		end,
 		Cancel = function() end,
-		Completed = Signal.new(),
+		Completed = completed,
 	}
 end
 local Debris = service("Debris")

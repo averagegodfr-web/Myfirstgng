@@ -420,7 +420,11 @@ local GameConfig = {
 	-- Creatures
 	BaseCreatureSlots = 15,
 	ExtraSlotsBonus = 25,
-	CreatureMoveSpeed = 26,
+	CreatureMoveSpeed = 24,
+	CreatureFollowDistance = 5, -- studs from the player it likes to stay at
+	CreatureAcceleration = 7, -- higher = snappier starts/stops
+	CreatureResponsiveness = 30, -- physics smoothing (higher = tighter, lower = floatier)
+	EnemyResponsiveness = 25,
 	CreatureLeashDistance = 70,
 	CreatureAggroRadius = 40,
 	CreatureDefendRadius = 16,
@@ -567,9 +571,13 @@ end
 do
 local n3 = make(n1, "Folder", "Shared", nil)
 make(n3, "ModuleScript", "Models", [=[
--- Procedural models built from parts, so the game ships with zero uploaded assets.
--- Every model has an anchored, invisible "Root" PrimaryPart; all other parts are welded to it,
--- so the server only moves Root.CFrame. Attributes: HipHeight (root height above ground), Radius.
+-- Builds creature / enemy / egg models.
+-- 1) If ReplicatedStorage.HatchOrDieAssets has a custom model for it, that model is used.
+-- 2) Otherwise a procedural model is built from parts (so the game works with zero assets).
+-- Every returned model has an invisible "Root" PrimaryPart that everything else is welded to.
+-- Attributes: HipHeight (root height above ground), Radius, Top (height of the top above root), Scale.
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
 local Config = script.Parent.Parent.Config
 local CreatureData = require(Config.CreatureData)
 local EnemyData = require(Config.EnemyData)
@@ -660,7 +668,7 @@ end
 ---------------------------------------------------------------------------------------------------
 -- Creatures
 ---------------------------------------------------------------------------------------------------
-function Models.BuildCreature(record): Model
+local function proceduralCreature(record): Model
 	local fam = CreatureData.Families[record.Family] or CreatureData.Families.Sprout
 	local stageIndex = math.clamp(record.Stage or 1, 1, #CreatureData.Stages)
 	local s = CreatureData.Stages[stageIndex].Scale
@@ -815,7 +823,7 @@ end
 ---------------------------------------------------------------------------------------------------
 -- Enemies
 ---------------------------------------------------------------------------------------------------
-function Models.BuildEnemy(typeId: string, variantId: string?): Model
+local function proceduralEnemy(typeId: string, variantId: string?): Model
 	local data = EnemyData.Types[typeId]
 	local variant = EnemyData.Variants[variantId or "Normal"] or EnemyData.Variants.Normal
 	local k = variant.Scale or 1
@@ -905,7 +913,7 @@ end
 ---------------------------------------------------------------------------------------------------
 -- Eggs
 ---------------------------------------------------------------------------------------------------
-function Models.BuildEgg(eggId: string): Model
+local function proceduralEgg(eggId: string): Model
 	local egg = EggData[eggId] or EggData.ForestEgg
 	local model, root, add = makeModel(eggId, false)
 	add(ellipsoid(Vector3.new(2, 2.6, 2), egg.Color), CFrame.new(), "Shell")
@@ -929,6 +937,210 @@ function Models.BuildEgg(eggId: string): Model
 	model:SetAttribute("Radius", 1)
 	return model
 end
+
+---------------------------------------------------------------------------------------------------
+-- Custom assets (ReplicatedStorage.HatchOrDieAssets)
+---------------------------------------------------------------------------------------------------
+Models.ASSETS_NAME = "HatchOrDieAssets"
+
+function Models.GetAsset(category: string, ...: string): Instance?
+	local assets = ReplicatedStorage:FindFirstChild(Models.ASSETS_NAME)
+	local folder = assets and assets:FindFirstChild(category)
+	if not folder then
+		return nil
+	end
+	local current: Instance = folder
+	for i = 1, select("#", ...) do
+		local name = select(i, ...)
+		local nextChild = current:FindFirstChild(name)
+		if not nextChild then
+			return nil
+		end
+		current = nextChild
+	end
+	if current == folder or current:IsA("Folder") then
+		return nil
+	end
+	return current
+end
+
+local function hasInternalJoints(model: Instance): boolean
+	for _, d in model:GetDescendants() do
+		if d:IsA("Motor6D") or d:IsA("Weld") or d:IsA("WeldConstraint") or d:IsA("ManualWeld") or d:IsA("Bone") then
+			return true
+		end
+	end
+	return false
+end
+
+-- Turns any designer model into a game-ready one: front = the model's pivot front (-Z / LookVector),
+-- centered on a new invisible Root, everything welded, non-colliding, scripts removed.
+function Models.PrepareCustom(template: Instance, scale: number?, queryable: boolean?): Model
+	local clone = template:Clone()
+	local model: Model
+	if clone:IsA("Model") then
+		model = clone
+	else
+		model = Instance.new("Model")
+		model.Name = clone.Name
+		clone.Parent = model
+	end
+	for _, d in model:GetDescendants() do
+		if d:IsA("BaseScript") or d:IsA("ModuleScript") then
+			d:Destroy()
+		elseif d:IsA("Humanoid") then
+			d.EvaluateStateMachine = false
+		end
+	end
+	local oldPrimary = model.PrimaryPart
+	for _, d in model:GetDescendants() do
+		if d:IsA("BasePart") and d.Name == "Root" then
+			d.Name = "Root_Original"
+		end
+	end
+	if scale and scale ~= 1 then
+		pcall(function()
+			model:ScaleTo(model:GetScale() * scale)
+		end)
+	end
+	model:PivotTo(CFrame.new())
+
+	local boxCFrame, size = model:GetBoundingBox()
+	local jointed = hasInternalJoints(model)
+	local root = newPart(Vector3.new(1, 1, 1), Color3.new(1, 1, 1))
+	root.Name = "Root"
+	root.Transparency = 1
+	root.Anchored = true
+	root.CFrame = CFrame.new(boxCFrame.Position)
+	root.Parent = model
+
+	local main = oldPrimary or model:FindFirstChild("HumanoidRootPart") or model:FindFirstChildWhichIsA("BasePart", true)
+	for _, d in model:GetDescendants() do
+		if d:IsA("BasePart") and d ~= root then
+			d.Anchored = false
+			d.CanCollide = false
+			d.CanTouch = false
+			d.CanQuery = queryable == true
+			d.Massless = true
+			if not jointed or d == main then
+				local weld = Instance.new("WeldConstraint")
+				weld.Part0 = root
+				weld.Part1 = d
+				weld.Parent = d
+			end
+		end
+	end
+	model.PrimaryPart = root
+	model:SetAttribute("HipHeight", size.Y / 2)
+	model:SetAttribute("Radius", math.max(size.X, size.Z) / 2)
+	model:SetAttribute("Top", size.Y / 2)
+	model:SetAttribute("Custom", true)
+	return model
+end
+
+local function tintMarked(model: Model, color: Color3, amount: number)
+	for _, d in model:GetDescendants() do
+		if d:IsA("BasePart") and d:GetAttribute("Tint") then
+			d.Color = d.Color:Lerp(color, amount)
+		end
+	end
+end
+
+-- Mutation + aura visuals for custom creature models (procedural ones do this themselves).
+local function applyCreatureFlair(model: Model, record, s: number)
+	local root = model.PrimaryPart :: BasePart
+	local mut = record.Mutation and CreatureData.MutationById[record.Mutation]
+	if mut then
+		tintMarked(model, mut.Color, 0.6)
+		particles(root, mut.Color, 0.35 * s, 8)
+		local light = Instance.new("PointLight")
+		light.Color = mut.Color
+		light.Range = 8 * s
+		light.Parent = root
+	end
+	if record.Aura then
+		local aura = CreatureData.Auras[record.Aura]
+		if aura then
+			local e = particles(root, aura.Color, 0.7 * s, 16, 2)
+			e.Name = "Aura"
+			local light = Instance.new("PointLight")
+			light.Name = "AuraLight"
+			light.Color = aura.Color
+			light.Range = 8 * s
+			light.Brightness = 1.5
+			light.Parent = root
+		end
+	end
+end
+
+-- Creatures: Assets/Creatures/<Family>/<Stage>_<Mutation>, then <Stage> (Baby/Teen/Adult or 1/2/3),
+-- then Assets/Creatures/<Family> as a single model scaled per stage.
+function Models.BuildCreature(record): Model
+	local stageIndex = math.clamp(record.Stage or 1, 1, #CreatureData.Stages)
+	local stage = CreatureData.Stages[stageIndex]
+	local family = record.Family
+	local template, scale = nil, 1
+	if record.Mutation then
+		template = Models.GetAsset("Creatures", family, stage.Name .. "_" .. record.Mutation)
+			or Models.GetAsset("Creatures", family, tostring(stageIndex) .. "_" .. record.Mutation)
+	end
+	template = template or Models.GetAsset("Creatures", family, stage.Name) or Models.GetAsset("Creatures", family, tostring(stageIndex))
+	if not template then
+		template = Models.GetAsset("Creatures", family)
+		scale = stage.Scale
+	end
+	if not template then
+		return proceduralCreature(record)
+	end
+	local model = Models.PrepareCustom(template, scale, false)
+	model.Name = family
+	model:SetAttribute("Scale", stage.Scale)
+	applyCreatureFlair(model, record, stage.Scale)
+	return model
+end
+
+-- Enemies: Assets/Enemies/<TypeId>_<Variant>, then Assets/Enemies/<TypeId> (scaled + tinted per variant).
+function Models.BuildEnemy(typeId: string, variantId: string?): Model
+	local vId = variantId or "Normal"
+	local variant = EnemyData.Variants[vId] or EnemyData.Variants.Normal
+	local template = Models.GetAsset("Enemies", typeId .. "_" .. vId)
+	local scale = 1
+	if not template then
+		template = Models.GetAsset("Enemies", typeId)
+		scale = variant.Scale or 1
+	end
+	if not template then
+		return proceduralEnemy(typeId, variantId)
+	end
+	local model = Models.PrepareCustom(template, scale, true)
+	model.Name = typeId
+	if variant.Tint then
+		tintMarked(model, variant.Tint, 0.5)
+		local light = Instance.new("PointLight")
+		light.Color = variant.Tint
+		light.Range = 10
+		light.Parent = model.PrimaryPart
+	end
+	return model
+end
+
+-- Eggs: Assets/Eggs/<EggId>.
+function Models.BuildEgg(eggId: string): Model
+	local template = Models.GetAsset("Eggs", eggId)
+	if not template then
+		return proceduralEgg(eggId)
+	end
+	local model = Models.PrepareCustom(template, 1, false)
+	model.Name = eggId
+	return model
+end
+
+-- Built-in versions, used by the asset exporter as editable starting points.
+Models.Procedural = {
+	Creature = proceduralCreature,
+	Enemy = proceduralEnemy,
+	Egg = proceduralEgg,
+}
 
 return Models
 ]=])

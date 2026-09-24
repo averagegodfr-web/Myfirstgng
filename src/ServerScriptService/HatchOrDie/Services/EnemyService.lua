@@ -6,6 +6,8 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Registry = require(script.Parent.Parent.Registry)
 local Effects = require(script.Parent.Parent.Modules.Effects)
+local Mover = require(script.Parent.Parent.Modules.Mover)
+local Animate = require(script.Parent.Parent.Modules.Animate)
 
 local Root = ReplicatedStorage:WaitForChild("HatchOrDie")
 local GameConfig = require(Root.Config.GameConfig)
@@ -87,11 +89,18 @@ end
 -- Spawning
 ---------------------------------------------------------------------------------------------------
 local function makeHealthBar(e)
+	local anchor = Instance.new("Attachment")
+	anchor.Name = "HealthBarAttachment"
+	anchor.Position = Vector3.new(0, e.Top + 0.6, 0)
+	anchor.Parent = e.Root
+
 	local gui = Instance.new("BillboardGui")
 	gui.Name = "HealthBar"
+	gui.Adornee = anchor
 	gui.Size = UDim2.fromOffset(90, 26)
-	gui.StudsOffset = Vector3.new(0, e.Top + 1.2, 0)
-	gui.MaxDistance = 120
+	gui.SizeOffset = Vector2.new(0, 0.5)
+	gui.AlwaysOnTop = true
+	gui.MaxDistance = 90
 	gui.LightInfluence = 0
 
 	if e.Variant.Prefix then
@@ -119,7 +128,7 @@ local function makeHealthBar(e)
 	fill.BackgroundColor3 = Color3.fromRGB(235, 60, 60)
 	fill.BorderSizePixel = 0
 	fill.Parent = back
-	gui.Parent = e.Root
+	gui.Parent = e.Model
 	return fill
 end
 
@@ -139,6 +148,7 @@ function EnemyService.Spawn(typeId: string, variantId: string?, position: Vector
 	local hip = model:GetAttribute("HipHeight") :: number
 	local top = model:GetAttribute("Top") :: number
 	root.CFrame = CFrame.new(position.X, GameConfig.GroundY + hip, position.Z)
+	local mover = Mover.Attach(model, GameConfig.EnemyResponsiveness)
 
 	local e = {
 		TypeId = typeId,
@@ -162,16 +172,26 @@ function EnemyService.Spawn(typeId: string, variantId: string?, position: Vector
 		Alive = true,
 		Busy = false,
 		DamageTakenMult = 1,
+		Mover = mover,
+		Pos = Vector3.new(position.X, 0, position.Z),
+		Vel = Vector3.zero,
+		Facing = Vector3.new(-position.X, 0, -position.Z).Unit,
+		Bob = 0,
+		Anim = Animate.Setup(model),
 	}
+	if e.Facing.X ~= e.Facing.X then
+		e.Facing = Vector3.new(0, 0, -1)
+	end
 	e.Health = e.MaxHealth
 	if not data.IsBoss then
 		e.Bar = makeHealthBar(e)
 	end
 
 	model.Parent = folder
+	Mover.Teleport(mover, root.Position, e.Facing)
 	table.insert(enemies, e)
 	byModel[model] = e
-	Effects.Burst(root.Position, Color3.fromRGB(90, 0, 130), 3, 0.4)
+	Effects.Burst(root.Position, Color3.fromRGB(90, 0, 130), 3, 0.4, if data.IsBoss then "BossSpawn" else "EnemySpawn")
 	return e
 end
 
@@ -192,7 +212,7 @@ local function kill(e, killer: Player?)
 	end
 	e.Alive = false
 	removeFromList(e)
-	Effects.Burst(e.Root.Position, e.Data.EyeColor, e.Radius * 2, 0.4)
+	Effects.Burst(e.Root.Position, e.Data.EyeColor, e.Radius * 2, 0.4, if e.Data.IsBoss then "BossDeath" else "EnemyDeath")
 	Effects.FadeOut(e.Model, 0.4)
 
 	if killer and killer.Parent then
@@ -223,8 +243,11 @@ function EnemyService.Damage(e, amount: number, source: Player?)
 	end
 	local color = if e.DamageTakenMult > 1 then Color3.fromRGB(255, 230, 60) else Color3.new(1, 1, 1)
 	Effects.DamageNumber(e.Root.Position + Vector3.new(0, e.Top + 1, 0), dealt, color)
+	Effects.Custom("Hit", e.Root.Position)
 	if e.Bar then
-		e.Bar.Size = UDim2.fromScale(math.clamp(e.Health / e.MaxHealth, 0, 1), 1)
+		local ratio = math.clamp(e.Health / e.MaxHealth, 0, 1)
+		e.Bar.Size = UDim2.fromScale(ratio, 1)
+		e.Bar.Visible = ratio > 0.001
 	end
 	if e.OnDamaged then
 		e.OnDamaged(e)
@@ -314,7 +337,8 @@ local function attack(e, target, now: number)
 			end
 			local from = if eye then eye.Position else e.Root.Position + Vector3.new(0, 2, 0)
 			local aim = target.Root.Position
-			local travel = Effects.Projectile(from, aim, data.EyeColor, data.ProjectileSpeed, 1.2)
+			Animate.Play(e.Anim, "Attack")
+			local travel = Effects.Projectile(from, aim, data.EyeColor, data.ProjectileSpeed, 1.2, "Projectile_" .. e.TypeId)
 			task.delay(travel, function()
 				if EnemyService.IsTargetValid(target) and flatDist(target.Root.Position, aim) < 5 then
 					EnemyService.ApplyDamage(target, e.Damage)
@@ -324,14 +348,15 @@ local function attack(e, target, now: number)
 	elseif data.Windup > 0 then
 		e.Busy = true
 		local radius = data.SmashRadius or 6
-		local center = e.Root.Position + e.Root.CFrame.LookVector * (e.Radius + radius * 0.4)
+		local center = e.Root.Position + e.Facing * (e.Radius + radius * 0.4)
 		Effects.Telegraph(center, "Disc", Vector2.new(radius, 0), data.Windup)
 		task.delay(data.Windup, function()
 			e.Busy = false
 			if not e.Alive then
 				return
 			end
-			Effects.Burst(Vector3.new(center.X, 1, center.Z), Color3.fromRGB(160, 110, 80), radius, 0.35)
+			Animate.Play(e.Anim, "Attack")
+			Effects.Burst(Vector3.new(center.X, 1, center.Z), Color3.fromRGB(160, 110, 80), radius, 0.35, "Smash_" .. e.TypeId)
 			for _, t in EnemyService.GatherTargets() do
 				if flatDist(t.Root.Position, center) <= radius + EnemyService.TargetRadius(t) then
 					EnemyService.ApplyDamage(t, e.Damage)
@@ -339,8 +364,27 @@ local function attack(e, target, now: number)
 			end
 		end)
 	else
+		Animate.Play(e.Anim, "Attack")
+		Effects.Custom("Attack_" .. e.TypeId, target.Root.Position, e.Facing)
 		EnemyService.ApplyDamage(target, e.Damage)
 	end
+end
+
+-- Smooth steering shared by all enemies (and the boss): accelerate toward a velocity, turn gradually.
+function EnemyService.Steer(e, desiredVelocity: Vector3, face: Vector3?, dt: number)
+	e.Vel = e.Vel:Lerp(desiredVelocity, math.clamp(dt * 6, 0, 1))
+	e.Pos += e.Vel * dt
+	if face and face.Magnitude > 0.01 then
+		local blended = e.Facing:Lerp(Vector3.new(face.X, 0, face.Z).Unit, math.clamp(dt * 7, 0, 1))
+		if blended.Magnitude > 0.01 then
+			e.Facing = blended.Unit
+		end
+	end
+	local speed = e.Vel.Magnitude
+	e.Bob += dt * speed * 0.9
+	local bob = if speed > 1 then math.abs(math.sin(e.Bob)) * 0.25 else 0
+	Mover.Set(e.Mover, Vector3.new(e.Pos.X, GameConfig.GroundY + e.Hip + bob, e.Pos.Z), e.Facing)
+	Animate.SetMoving(e.Anim, speed > 1)
 end
 
 local function stepEnemy(e, dt: number, now: number, targets)
@@ -355,11 +399,11 @@ local function stepEnemy(e, dt: number, now: number, targets)
 	end
 
 	local data = e.Data
-	local pos = e.Root.Position
+	local pos = e.Pos
 	local goal = if target then target.Root.Position else campPosition
 	local toGoal = Vector3.new(goal.X - pos.X, 0, goal.Z - pos.Z)
 	local dist = toGoal.Magnitude
-	local dir = if dist > 0.01 then toGoal / dist else e.Root.CFrame.LookVector
+	local dir = if dist > 0.01 then toGoal / dist else e.Facing
 	local targetRadius = if target then EnemyService.TargetRadius(target) else 0
 
 	local move = Vector3.zero
@@ -373,17 +417,11 @@ local function stepEnemy(e, dt: number, now: number, targets)
 		else
 			local stopAt = if target then data.AttackRange * 0.8 + targetRadius + e.Radius * 0.5 else 8
 			if dist > stopAt then
-				move = dir
+				move = dir * math.clamp((dist - stopAt) / 4, 0.3, 1)
 			end
 		end
 	end
-
-	local newPos = pos + move * e.Speed * dt
-	local look = Vector3.new(dir.X, 0, dir.Z)
-	if look.Magnitude < 0.01 then
-		look = Vector3.new(0, 0, -1)
-	end
-	e.Root.CFrame = CFrame.lookAt(newPos, newPos + look)
+	EnemyService.Steer(e, move * e.Speed, dir, dt)
 
 	if target and not e.Busy and now >= e.NextAttack and dist <= data.AttackRange + targetRadius + e.Radius * 0.5 then
 		attack(e, target, now)

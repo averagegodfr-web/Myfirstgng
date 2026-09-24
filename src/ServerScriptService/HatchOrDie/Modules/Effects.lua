@@ -1,6 +1,10 @@
 -- Short-lived server VFX. Everything is anchored, non-colliding and cleaned up by Debris.
+-- Any effect with a name can be replaced by a designer template in ReplicatedStorage.HatchOrDieAssets.Effects
+-- (a Part, Model or Attachment holding ParticleEmitters / Sounds / Lights). Template attributes:
+--   Lifetime (seconds before cleanup, default 2), EmitDuration (seconds emitters stay on, default 0.15).
 local TweenService = game:GetService("TweenService")
 local Debris = game:GetService("Debris")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Effects = {}
 
@@ -33,7 +37,92 @@ local function fxPart(size: Vector3, color: Color3, shape: Enum.PartType?): Part
 	return p
 end
 
-function Effects.Burst(position: Vector3, color: Color3, radius: number, duration: number?)
+local function template(name: string?): Instance?
+	if not name then
+		return nil
+	end
+	local assets = ReplicatedStorage:FindFirstChild("HatchOrDieAssets")
+	local effects = assets and assets:FindFirstChild("Effects")
+	return effects and effects:FindFirstChild(name)
+end
+
+function Effects.HasCustom(name: string): boolean
+	return template(name) ~= nil
+end
+
+-- Turns a template clone into an anchored effect at `cf`. Returns the part that holds it.
+local function place(fx: Instance, cf: CFrame): Instance
+	for _, d in fx:GetDescendants() do
+		if d:IsA("BaseScript") or d:IsA("ModuleScript") then
+			d:Destroy()
+		end
+	end
+	local holder: Instance = fx
+	if fx:IsA("Attachment") then
+		local part = fxPart(Vector3.new(0.2, 0.2, 0.2), Color3.new(1, 1, 1))
+		part.Transparency = 1
+		part.CFrame = cf
+		fx.Parent = part
+		holder = part
+	elseif fx:IsA("BasePart") then
+		fx.Anchored = true
+		fx.CanCollide = false
+		fx.CanQuery = false
+		fx.CanTouch = false
+		fx.CFrame = cf
+	elseif fx:IsA("Model") then
+		for _, d in fx:GetDescendants() do
+			if d:IsA("BasePart") then
+				d.Anchored = true
+				d.CanCollide = false
+				d.CanQuery = false
+				d.CanTouch = false
+			end
+		end
+		fx:PivotTo(cf)
+	end
+	return holder
+end
+
+local function start(holder: Instance, source: Instance)
+	for _, d in holder:GetDescendants() do
+		if d:IsA("Sound") then
+			d:Play()
+		elseif d:IsA("ParticleEmitter") then
+			d.Enabled = true
+		end
+	end
+	local emitFor = source:GetAttribute("EmitDuration") or 0.15
+	task.delay(emitFor, function()
+		for _, d in holder:GetDescendants() do
+			if d:IsA("ParticleEmitter") then
+				d.Enabled = false
+			end
+		end
+	end)
+	Debris:AddItem(holder, source:GetAttribute("Lifetime") or 2)
+end
+
+-- Plays a designer effect if one exists. Returns true when it did.
+function Effects.Custom(name: string?, position: Vector3, direction: Vector3?): boolean
+	local source = template(name)
+	if not source then
+		return false
+	end
+	local cf = CFrame.new(position)
+	if direction and direction.Magnitude > 0.01 then
+		cf = CFrame.lookAt(position, position + direction)
+	end
+	local holder = place(source:Clone(), cf)
+	holder.Parent = getFolder()
+	start(holder, source)
+	return true
+end
+
+function Effects.Burst(position: Vector3, color: Color3, radius: number, duration: number?, name: string?)
+	if Effects.Custom(name, position) then
+		return
+	end
 	local d = duration or 0.45
 	local p = fxPart(Vector3.new(1, 1, 1), color, Enum.PartType.Ball)
 	p.Transparency = 0.25
@@ -47,9 +136,50 @@ function Effects.Burst(position: Vector3, color: Color3, radius: number, duratio
 end
 
 -- Returns travel time so the caller can apply damage on arrival.
-function Effects.Projectile(from: Vector3, to: Vector3, color: Color3, speed: number, size: number?): number
+function Effects.Projectile(from: Vector3, to: Vector3, color: Color3, speed: number, size: number?, name: string?): number
 	local dist = (to - from).Magnitude
 	local t = math.max(0.05, dist / speed)
+	local source = template(name)
+	if source then
+		local startCF = if dist > 0.01 then CFrame.lookAt(from, to) else CFrame.new(from)
+		local fx = source:Clone()
+		local holder = place(fx, startCF)
+		local mover: BasePart? = nil
+		if holder:IsA("BasePart") then
+			mover = holder
+		elseif holder:IsA("Model") then
+			mover = holder.PrimaryPart or holder:FindFirstChildWhichIsA("BasePart", true)
+			for _, d in holder:GetDescendants() do
+				if d:IsA("BasePart") and d ~= mover then
+					d.Anchored = false
+					local weld = Instance.new("WeldConstraint")
+					weld.Part0 = mover
+					weld.Part1 = d
+					weld.Parent = d
+				end
+			end
+		end
+		holder.Parent = getFolder()
+		for _, d in holder:GetDescendants() do
+			if d:IsA("Sound") then
+				d:Play()
+			end
+		end
+		if mover then
+			TweenService:Create(mover, TweenInfo.new(t, Enum.EasingStyle.Linear), { CFrame = startCF - startCF.Position + to }):Play()
+		end
+		task.delay(t, function()
+			for _, d in holder:GetDescendants() do
+				if d:IsA("ParticleEmitter") or d:IsA("Trail") or d:IsA("Beam") then
+					d.Enabled = false
+				elseif d:IsA("BasePart") then
+					d.Transparency = 1
+				end
+			end
+		end)
+		Debris:AddItem(holder, t + (source:GetAttribute("Lifetime") or 1))
+		return t
+	end
 	local p = fxPart(Vector3.new(1, 1, 1) * (size or 1.2), color, Enum.PartType.Ball)
 	p.Position = from
 	local light = Instance.new("PointLight")
@@ -83,6 +213,12 @@ end
 function Effects.Spikes(origin: Vector3, direction: Vector3, length: number, color: Color3)
 	local dir = Vector3.new(direction.X, 0, direction.Z).Unit
 	local count = math.floor(length / 5)
+	if Effects.HasCustom("BossSpikes") then
+		for i = 1, count do
+			task.delay(i * 0.03, Effects.Custom, "BossSpikes", origin + dir * (i * 5), dir)
+		end
+		return
+	end
 	for i = 1, count do
 		local pos = origin + dir * (i * 5)
 		local spike = Instance.new("WedgePart")
