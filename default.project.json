@@ -1,0 +1,23 @@
+{
+  "name": "HatchOrDie",
+  "tree": {
+    "$className": "DataModel",
+    "ReplicatedStorage": {
+      "HatchOrDie": {
+        "$path": "src/ReplicatedStorage/HatchOrDie"
+      }
+    },
+    "ServerScriptService": {
+      "HatchOrDie": {
+        "$path": "src/ServerScriptService/HatchOrDie"
+      }
+    },
+    "StarterPlayer": {
+      "StarterPlayerScripts": {
+        "HatchOrDieClient": {
+          "$path": "src/StarterPlayer/StarterPlayerScripts/HatchOrDieClient"
+        }
+      }
+    }
+  }
+}
