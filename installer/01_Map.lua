@@ -1,4 +1,4 @@
--- HATCH OR DIE - installer PART 1 of 4: MAP + TORCH
+-- HATCH OR DIE - installer PART 1 of 4: MAP + TORCH  (map v3)
 -- Paste everything into the Roblox Studio command bar (View > Command Bar) and press Enter.
 -- Re-running rebuilds the map from scratch (it replaces Workspace.Map and the Torch).
 --
@@ -139,17 +139,48 @@ end
 ---------------------------------------------------------------------------------------------------
 -- Your models (ServerStorage.MapAssets)
 ---------------------------------------------------------------------------------------------------
-local assetsFolder = ServerStorage:FindFirstChild("MapAssets")
-
-local function assetList(folderName)
-	local list = {}
-	local f = assetsFolder and assetsFolder:FindFirstChild(folderName)
-	if f then
-		for _, child in f:GetChildren() do
-			if child:IsA("Model") or child:IsA("BasePart") then
-				table.insert(list, child)
-			end
+-- Forgiving lookup: MapAssets can be in ServerStorage, ReplicatedStorage, Workspace or Lighting,
+-- names are case-insensitive, singular or plural both work, and models can be nested in sub-folders.
+local function findChildLoose(parent, names)
+	for _, child in parent:GetChildren() do
+		local lower = child.Name:lower():gsub("%s", "")
+		if table.find(names, lower) then
+			return child
 		end
+	end
+	return nil
+end
+
+local assetsFolder
+for _, container in { ServerStorage, game:GetService("ReplicatedStorage"), workspace, game:GetService("Lighting") } do
+	assetsFolder = findChildLoose(container, { "mapassets", "mapasset", "assets" })
+	if assetsFolder then
+		break
+	end
+end
+
+local CATEGORY_NAMES = {
+	Trees = { "trees", "tree" },
+	Grass = { "grass", "grasses" },
+	Rocks = { "rocks", "rock", "stones", "stone" },
+	Decor = { "decor", "decors", "decoration", "decorations", "props", "prop" },
+}
+
+local function collectModels(container, out)
+	for _, child in container:GetChildren() do
+		if child:IsA("Model") or child:IsA("BasePart") then
+			table.insert(out, child)
+		elseif child:IsA("Folder") then
+			collectModels(child, out)
+		end
+	end
+end
+
+local function assetList(category)
+	local list = {}
+	local f = assetsFolder and findChildLoose(assetsFolder, CATEGORY_NAMES[category])
+	if f then
+		collectModels(f, list)
 	end
 	return list
 end
@@ -158,6 +189,20 @@ local TREE_ASSETS = assetList("Trees")
 local GRASS_ASSETS = assetList("Grass")
 local ROCK_ASSETS = assetList("Rocks")
 local DECOR_ASSETS = assetList("Decor")
+
+if assetsFolder then
+	print(("🔎 Found your assets at %s"):format(assetsFolder:GetFullName()))
+	for _, child in assetsFolder:GetChildren() do
+		local count = {}
+		collectModels(child, count)
+		print(("   - %s (%s): %d model(s)"):format(child.Name, child.ClassName, #count))
+	end
+	if assetsFolder:IsDescendantOf(workspace) then
+		print("⚠️ Your MapAssets folder is in Workspace, so the originals are still visible in the world. Move it to ServerStorage.")
+	end
+else
+	print("🔎 No MapAssets folder found in ServerStorage, ReplicatedStorage, Workspace or Lighting.")
+end
 
 -- Clones a random variant, anchors it, strips scripts, randomly rotates/scales it and sets it on the ground.
 local function placeAsset(list, parent, position, decorative)
@@ -676,7 +721,7 @@ torch.Parent = StarterPack
 
 Players.CharacterAutoLoads = false
 
-print(("✅ HATCH OR DIE Part 1/4 done: map + torch built. Your models used -> Trees: %d, Grass: %d, Rocks: %d, Decor: %d variants. Now run Part 2."):format(#TREE_ASSETS, #GRASS_ASSETS, #ROCK_ASSETS, #DECOR_ASSETS))
+print(("✅ HATCH OR DIE Part 1/4 (map v3) done: map + torch built. Your models used -> Trees: %d, Grass: %d, Rocks: %d, Decor: %d variants. Now run Part 2."):format(#TREE_ASSETS, #GRASS_ASSETS, #ROCK_ASSETS, #DECOR_ASSETS))
 if not assetsFolder then
-	print("ℹ️ No ServerStorage.MapAssets folder found, so built-in trees/rocks were used. See the top of this script to use your own models.")
+	print("ℹ️ No MapAssets folder found, so built-in trees/rocks were used. See the top of this script to use your own models.")
 end

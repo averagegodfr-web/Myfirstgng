@@ -63,10 +63,12 @@ print("== Installers")
 do
 	local roblox = require("@lune/roblox")
 	local assets = sim.Instance.new("Folder")
-	assets.Name = "MapAssets"
+	assets.Name = "mapassets"
 	local trees = sim.Instance.new("Folder", assets)
-	trees.Name = "Trees"
-	local tree = sim.Instance.new("Model", trees)
+	trees.Name = "Tree"
+	local nested = sim.Instance.new("Folder", trees)
+	nested.Name = "Pines"
+	local tree = sim.Instance.new("Model", nested)
 	tree.Name = "MyTree"
 	local trunk = sim.Instance.new("Part", tree)
 	trunk.Size = roblox.Vector3.new(2, 14, 2)
