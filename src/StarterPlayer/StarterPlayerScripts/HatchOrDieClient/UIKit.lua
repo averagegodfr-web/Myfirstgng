@@ -115,23 +115,39 @@ function UIKit.button(props: { [string]: any }, onClick: (() -> ())?): TextButto
 	UIKit.corner(button, 10)
 	UIKit.stroke(button, Color3.new(0, 0, 0), 2, 0.4)
 	UIKit.new("UITextSizeConstraint", { MaxTextSize = 28, Parent = button })
-	local scale = UIKit.new("UIScale", { Parent = button })
-	button.MouseEnter:Connect(function()
-		UIKit.tween(scale, 0.1, { Scale = 1.05 })
-	end)
-	button.MouseLeave:Connect(function()
-		UIKit.tween(scale, 0.1, { Scale = 1 })
-	end)
-	button.MouseButton1Down:Connect(function()
-		UIKit.tween(scale, 0.06, { Scale = 0.94 })
-	end)
-	button.MouseButton1Up:Connect(function()
-		UIKit.tween(scale, 0.1, { Scale = 1 })
-	end)
+	UIKit.decorate(button)
 	if onClick then
 		button.Activated:Connect(onClick)
 	end
 	return button
+end
+
+-- Hover/press bounce for any button, including ones a designer made in Studio. Safe to call twice.
+local decorated = setmetatable({}, { __mode = "k" })
+function UIKit.decorate(button: GuiButton)
+	if decorated[button] or not button:IsA("GuiButton") then
+		return
+	end
+	decorated[button] = true
+	local scale = button:FindFirstChildOfClass("UIScale") or UIKit.new("UIScale", { Parent = button })
+	local base = scale.Scale
+	button.MouseEnter:Connect(function()
+		UIKit.tween(scale, 0.1, { Scale = base * 1.05 })
+	end)
+	button.MouseLeave:Connect(function()
+		UIKit.tween(scale, 0.1, { Scale = base })
+	end)
+	button.MouseButton1Down:Connect(function()
+		UIKit.tween(scale, 0.06, { Scale = base * 0.94 })
+	end)
+	button.MouseButton1Up:Connect(function()
+		UIKit.tween(scale, 0.1, { Scale = base })
+	end)
+end
+
+-- Multiplies a UDim2 (used to animate designer-sized frames relative to their own size).
+function UIKit.scaleUDim2(size: UDim2, k: number): UDim2
+	return UDim2.new(size.X.Scale * k, size.X.Offset * k, size.Y.Scale * k, size.Y.Offset * k)
 end
 
 function UIKit.bar(props: { [string]: any }, fillColor: Color3): (Frame, Frame)

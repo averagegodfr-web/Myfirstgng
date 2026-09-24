@@ -42,6 +42,31 @@ ServerStorage
 - The counts are at the top of `01_Map.lua` (`TREE_COUNT = 190`, `GRASS_COUNT = 350`, ...). Lower them if your models have lots of parts.
 - Then run Part 1 again. The Output window tells you how many of your models it used.
 
+## Editing the UI visually
+
+1. Paste [`installer/05_ExportUI.lua`](installer/05_ExportUI.lua) into the command bar. The whole HUD and menu window appear in **StarterGui → HatchOrDieUI** as normal Frames, TextLabels and TextButtons.
+2. Design it however you like in Studio: move, resize, recolor, change fonts, add UIGradients, UIStrokes, ImageLabels, icons, or extra decoration.
+3. Press Play. The game uses your version automatically.
+
+**The one rule: keep the element names.** The code finds elements by name, wherever they are in the tree, so you can regroup or re-parent them freely. If you delete one, the game hides that feature and prints a warning instead of breaking.
+
+| Area | Names |
+|---|---|
+| Top banner | `PhaseBanner` (a UIGradient inside is recolored day/night; delete it to keep your own colors), `PhaseTitle`, `PhaseSub`, `Objective` |
+| Boss | `BossBar`, `BossName`, `BossFill` (width = boss health) |
+| Currencies | `Coins`, `Berries`, `Best` |
+| Creature card | `CreatureCard`, `CreatureName`, `CreatureStage`, `CreatureHPFill`, `CreatureHPText`, `CreatureXPFill`, `CreatureXPText`, `EvolveButton` |
+| Actions | `ModeFollow`, `ModeAttack`, `ModeDefend` (add a Color3 attribute `SelectedColor` to pick the highlight color), `FeedButton`, `AbilityButton`, `AbilityCooldown` (height = cooldown left) |
+| Menu | `MenuEggs`, `MenuCreatures`, `MenuShop`, `EggBadge`, `Incubator`, `IncubatorText`, `IncubatorFill` |
+| Messages | `Toasts` (container), `Announcement`, `BigTitle`, `BigSub`, `NightResult`, `ResultTitle`, `ResultBody`, `DeathOverlay` |
+| Menu window | `Window`, `WindowTitle`, `WindowClose`, `WindowContent` (menus are drawn inside this) |
+| Optional | `ToastTemplate`: design one notification (with a TextLabel named `Label` inside) and every notification copies it |
+
+Tips:
+- **"Fill" bars** (`BossFill`, `CreatureHPFill`, ...) get their width set by the game, so put them inside a background frame.
+- **Hidden elements:** the game hides some elements until needed, for example the boss bar and the evolve button. `DeathOverlay` and `Window` are exported hidden, so tick **Visible** to edit them.
+- **Hover bounce:** buttons get the bounce effect automatically.
+
 ## Controls
 
 | Action | PC | Mobile |

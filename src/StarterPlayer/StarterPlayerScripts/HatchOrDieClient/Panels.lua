@@ -13,6 +13,7 @@ local ctx
 local window: Frame
 local titleLabel: TextLabel
 local content: Frame
+local windowSize: UDim2
 local current: string? = nil
 local selectedCreature: string? = nil
 local shopTab = "Eggs"
@@ -394,8 +395,8 @@ function Panels.Open(name: string)
 	end
 	current = name
 	window.Visible = true
-	window.Size = UDim2.fromScale(0.85, 0.72)
-	UIKit.tween(window, 0.2, { Size = UDim2.fromScale(0.9, 0.78) }, Enum.EasingStyle.Back)
+	window.Size = UIKit.scaleUDim2(windowSize, 0.94)
+	UIKit.tween(window, 0.2, { Size = windowSize }, Enum.EasingStyle.Back)
 	Panels.Render(true)
 end
 
@@ -419,22 +420,15 @@ end
 
 function Panels.Init(context)
 	ctx = context
-	window = UIKit.panel({
-		Name = "Window",
-		AnchorPoint = Vector2.new(0.5, 0.5),
-		Position = UDim2.fromScale(0.5, 0.5),
-		Size = UDim2.fromScale(0.9, 0.78),
-		BackgroundColor3 = C.Bg,
-		BackgroundTransparency = 0.05,
-		Visible = false,
-		ZIndex = 5,
-		Parent = ctx.Gui,
-	})
-	UIKit.new("UISizeConstraint", { MaxSize = Vector2.new(760, 520), Parent = window })
-	UIKit.padding(window, 12)
-	titleLabel = UIKit.text({ Size = UDim2.new(1, -50, 0, 32), Font = Enum.Font.FredokaOne, TextXAlignment = Enum.TextXAlignment.Left, Parent = window })
-	UIKit.button({ AnchorPoint = Vector2.new(1, 0), Position = UDim2.new(1, 0, 0, 0), Size = UDim2.fromOffset(40, 32), BackgroundColor3 = C.Bad, Text = "X", Parent = window }, Panels.Close)
-	content = UIKit.new("Frame", { Position = UDim2.fromOffset(0, 40), Size = UDim2.new(1, 0, 1, -40), BackgroundTransparency = 1, Parent = window })
+	local find = ctx.Layout.Finder(ctx.Gui)
+	window = find("Window", "Frame")
+	titleLabel = find("WindowTitle", "TextLabel")
+	content = find("WindowContent", "Frame")
+	local closeButton = find("WindowClose")
+	UIKit.decorate(closeButton)
+	closeButton.Activated:Connect(Panels.Close)
+	windowSize = window.Size
+	window.Visible = false
 
 	ctx.ProfileChanged:Connect(function()
 		Panels.Render(false)

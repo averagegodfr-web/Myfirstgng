@@ -17,16 +17,12 @@ local ShopData = require(Root.Config.ShopData)
 local Rarity = require(Root.Config.Rarity)
 
 local UIKit = require(script.UIKit)
+local Layout = require(script.Layout)
 local Hud = require(script.Hud)
 local Panels = require(script.Panels)
 local Cinematics = require(script.Cinematics)
 
-local gui = UIKit.new("ScreenGui", {
-	Name = "HatchOrDieUI",
-	ResetOnSpawn = false,
-	ZIndexBehavior = Enum.ZIndexBehavior.Sibling,
-	Parent = player:WaitForChild("PlayerGui"),
-})
+local gui = Layout.Obtain(player)
 
 local ctx = {
 	Root = Root,
@@ -38,6 +34,7 @@ local ctx = {
 	EggData = EggData,
 	ShopData = ShopData,
 	Rarity = Rarity,
+	Layout = Layout,
 	Profile = nil,
 	SavingEnabled = true,
 	ProfileChanged = Signal.new(),

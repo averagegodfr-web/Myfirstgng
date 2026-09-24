@@ -358,10 +358,55 @@ check(RS.HatchOrDie:GetAttribute("Night") == 1, "everyone down at night -> back 
 check(clientPlayer.Character and clientPlayer.Character.Humanoid.Health > 0, "player respawned after wipe")
 
 ---------------------------------------------------------------------------------------------------
+print("== Designer UI in StarterGui")
+local veteran = clientPlayer
+do
+	local before = #sim.errors
+	runSource(fs.readFile("installer/05_ExportUI.lua"), "05_ExportUI.lua", nil)
+	sim.run(0.1)
+	local exported = game:GetService("StarterGui"):FindFirstChild("HatchOrDieUI")
+	check(#sim.errors == before and exported ~= nil, "UI export creates StarterGui.HatchOrDieUI")
+	local roblox = require("@lune/roblox")
+	local custom = roblox.Color3.fromRGB(1, 2, 3)
+	exported:FindFirstChild("PhaseBanner", true).BackgroundColor3 = custom
+	exported:FindFirstChild("Best", true):Destroy()
+	local toast = sim.Instance.new("Frame", exported)
+	toast.Name = "ToastTemplate"
+	local toastLabel = sim.Instance.new("TextLabel", toast)
+	toastLabel.Name = "Label"
+
+	local designer = sim.addPlayer("Designer")
+	clientPlayer = designer
+	game:GetService("Players").LocalPlayer = designer
+	sim.run(1)
+	runSource(SPS.HatchOrDieClient.Source, "HatchOrDieClient(designer)", SPS.HatchOrDieClient, makeRequire())
+	sim.run(15)
+	local guis = 0
+	for _, g in designer.PlayerGui:GetChildren() do
+		if g.Name == "HatchOrDieUI" then
+			guis += 1
+		end
+	end
+	local gui = designer.PlayerGui:FindFirstChild("HatchOrDieUI")
+	check(guis == 1, "client uses the designer's UI (no duplicate built-in UI)")
+	check(gui:FindFirstChild("PhaseBanner", true).BackgroundColor3 == custom, "designer styling is kept in game")
+	check(gui.MissingElements:FindFirstChild("Best") ~= nil, "deleted element gets a hidden placeholder instead of crashing")
+	RS.HatchOrDie.Remotes.Notify:FireClient(designer, "hello")
+	sim.run(0.1)
+	local toasts = 0
+	for _, t in gui:FindFirstChild("Toasts", true):GetChildren() do
+		if t.Name == "ToastTemplate" then
+			toasts += 1
+		end
+	end
+	check(toasts > 0, "designer's ToastTemplate used for notifications")
+	check(#sim.errors == before, "designer UI runs without errors")
+end
+
 print("== Shutdown save")
 sim.task.spawn(sim.bindToClose)
 sim.run(2)
-check(sim.datastore["P_" .. clientPlayer.UserId].Data.HighestNight >= 10, "BindToClose saved progress")
+check(sim.datastore["P_" .. veteran.UserId].Data.HighestNight >= 10, "BindToClose saved progress")
 
 local invalid = {}
 for name in sim.invalidProperties do

@@ -20,331 +20,109 @@ local function serverNow(): number
 end
 
 ---------------------------------------------------------------------------------------------------
--- Build
+-- Bind: find every element by name (built-in Layout or the designer's StarterGui.HatchOrDieUI)
 ---------------------------------------------------------------------------------------------------
-local function buildPhaseBanner(gui: ScreenGui)
-	local banner = UIKit.panel({
-		Name = "PhaseBanner",
-		AnchorPoint = Vector2.new(0.5, 0),
-		Position = UDim2.new(0.5, 0, 0, 6),
-		Size = UDim2.fromOffset(300, 62),
-		Parent = gui,
-	})
-	refs.BannerGradient = UIKit.new("UIGradient", { Rotation = 90, Parent = banner })
-	refs.PhaseTitle = UIKit.text({
-		Size = UDim2.new(1, -16, 0, 34),
-		Position = UDim2.fromOffset(8, 4),
-		Font = Enum.Font.FredokaOne,
-		TextStrokeTransparency = 0.3,
-		Parent = banner,
-	})
-	refs.PhaseSub = UIKit.text({
-		Size = UDim2.new(1, -16, 0, 18),
-		Position = UDim2.fromOffset(8, 38),
-		TextColor3 = C.SubText,
-		Parent = banner,
-	})
+local baseSizes = {}
+local modeColors = {}
+local toastTemplate: GuiObject? = nil
 
-	refs.Objective = UIKit.text({
-		AnchorPoint = Vector2.new(0.5, 0),
-		Position = UDim2.new(0.5, 0, 0, 74),
-		Size = UDim2.new(0.6, 0, 0, 22),
-		BackgroundTransparency = 0.45,
-		BackgroundColor3 = C.Bg,
-		TextColor3 = C.Text,
-		Font = Enum.Font.GothamMedium,
-		Parent = gui,
-	})
-	UIKit.corner(refs.Objective, 8)
-	UIKit.new("UISizeConstraint", { MaxSize = Vector2.new(520, 22), Parent = refs.Objective })
-end
-
-local function buildBossBar(gui: ScreenGui)
-	local frame = UIKit.new("Frame", {
-		Name = "BossBar",
-		AnchorPoint = Vector2.new(0.5, 0),
-		Position = UDim2.new(0.5, 0, 0, 104),
-		Size = UDim2.new(0.7, 0, 0, 42),
-		BackgroundTransparency = 1,
-		Visible = false,
-		Parent = gui,
-	})
-	UIKit.new("UISizeConstraint", { MaxSize = Vector2.new(520, 42), Parent = frame })
-	refs.BossName = UIKit.text({
-		Size = UDim2.new(1, 0, 0, 18),
-		Font = Enum.Font.FredokaOne,
-		TextColor3 = Color3.fromRGB(255, 120, 90),
-		TextStrokeTransparency = 0.2,
-		Parent = frame,
-	})
-	local back, fill = UIKit.bar({ Position = UDim2.fromOffset(0, 20), Size = UDim2.new(1, 0, 0, 18), Parent = frame }, Color3.fromRGB(220, 50, 50))
-	UIKit.stroke(back, Color3.new(0, 0, 0), 2, 0.2)
-	refs.BossFill = fill
-	refs.BossFrame = frame
-end
-
-local function buildCurrencies(gui: ScreenGui)
-	local panel = UIKit.panel({
-		Name = "Currencies",
-		Position = UDim2.fromOffset(10, 10),
-		Size = UDim2.fromOffset(150, 92),
-		Parent = gui,
-	})
-	UIKit.padding(panel, 6)
-	UIKit.new("UIListLayout", { Padding = UDim.new(0, 2), Parent = panel })
-	local function row(icon: string, color: Color3)
-		return UIKit.text({
-			Size = UDim2.new(1, 0, 0, 25),
-			TextXAlignment = Enum.TextXAlignment.Left,
-			TextColor3 = color,
-			Font = Enum.Font.FredokaOne,
-			Text = icon .. " 0",
-			Parent = panel,
-		})
+local function bind(gui: ScreenGui)
+	local find = ctx.Layout.Finder(gui)
+	for _, name in {
+		"PhaseBanner", "PhaseTitle", "PhaseSub", "Objective", "BossBar", "BossName", "BossFill",
+		"Coins", "Berries", "Best", "CreatureCard", "CreatureName", "CreatureStage", "CreatureHPFill",
+		"CreatureHPText", "CreatureXPFill", "CreatureXPText", "EvolveButton", "FeedButton", "AbilityButton",
+		"AbilityCooldown", "EggBadge", "Incubator", "IncubatorText", "IncubatorFill", "Toasts",
+		"Announcement", "BigTitle", "BigSub", "NightResult", "ResultTitle", "ResultBody", "DeathOverlay",
+	} do
+		refs[name] = find(name)
 	end
-	refs.Coins = row("🪙", C.Gold)
-	refs.Berries = row("🍓", C.Berry)
-	refs.Best = row("🏆", C.Text)
-end
+	refs.BannerGradient = refs.PhaseBanner:FindFirstChildOfClass("UIGradient")
+	refs.ModeButtons = {}
+	for _, mode in { "Follow", "Attack", "Defend" } do
+		local button = find("Mode" .. mode)
+		refs.ModeButtons[mode] = button
+		modeColors[button] = button.BackgroundColor3
+	end
+	refs.MenuButtons = {}
+	for _, name in { "Eggs", "Creatures", "Shop" } do
+		refs.MenuButtons[name] = find("Menu" .. name)
+	end
+	local template = gui:FindFirstChild("ToastTemplate", true)
+	if template and template:IsA("GuiObject") then
+		toastTemplate = template
+		template.Visible = false
+	end
+	for _, name in { "Announcement", "BigTitle", "NightResult" } do
+		baseSizes[name] = refs[name].Size
+	end
 
-local function buildCreatureCard(gui: ScreenGui)
-	local card = UIKit.panel({
-		Name = "CreatureCard",
-		AnchorPoint = Vector2.new(0, 0.5),
-		Position = UDim2.new(0, 10, 0.45, 0),
-		Size = UDim2.fromOffset(230, 128),
-		Parent = gui,
-	})
-	UIKit.padding(card, 8)
-	refs.CreatureName = UIKit.text({ Size = UDim2.new(1, 0, 0, 24), Font = Enum.Font.FredokaOne, TextXAlignment = Enum.TextXAlignment.Left, Parent = card })
-	refs.CreatureStage = UIKit.text({ Position = UDim2.fromOffset(0, 24), Size = UDim2.new(1, 0, 0, 16), TextColor3 = C.SubText, TextXAlignment = Enum.TextXAlignment.Left, Parent = card })
-	local _, hpFill = UIKit.bar({ Position = UDim2.fromOffset(0, 46), Size = UDim2.new(1, 0, 0, 14), Parent = card }, C.Good)
-	refs.CreatureHPFill = hpFill
-	refs.CreatureHPText = UIKit.text({ Position = UDim2.fromOffset(0, 46), Size = UDim2.new(1, 0, 0, 14), TextStrokeTransparency = 0.2, Parent = card })
-	local _, xpFill = UIKit.bar({ Position = UDim2.fromOffset(0, 66), Size = UDim2.new(1, 0, 0, 10), Parent = card }, C.Accent)
-	refs.CreatureXPFill = xpFill
-	refs.CreatureXPText = UIKit.text({ Position = UDim2.fromOffset(0, 78), Size = UDim2.new(1, 0, 0, 14), TextColor3 = C.SubText, TextXAlignment = Enum.TextXAlignment.Left, Parent = card })
-	refs.EvolveButton = UIKit.button({
-		Position = UDim2.new(0, 0, 1, -18),
-		Size = UDim2.new(1, 0, 0, 22),
-		BackgroundColor3 = C.Gold,
-		TextColor3 = Color3.fromRGB(40, 25, 0),
-		Text = "✨ EVOLVE!",
-		Visible = false,
-		Parent = card,
-	}, function()
+	-- Behavior
+	local function onClick(button, fn)
+		UIKit.decorate(button)
+		button.Activated:Connect(fn)
+	end
+	onClick(refs.EvolveButton, function()
 		local profile = ctx.Profile
 		if profile and profile.Equipped then
 			ctx.Net.Get("EvolveCreature"):FireServer(profile.Equipped)
 		end
 	end)
-	refs.CreatureCard = card
-end
-
-local function buildActions(gui: ScreenGui)
-	local cluster = UIKit.new("Frame", {
-		Name = "Actions",
-		AnchorPoint = Vector2.new(1, 1),
-		Position = UDim2.new(1, -10, 1, -10),
-		Size = UDim2.fromOffset(250, 170),
-		BackgroundTransparency = 1,
-		Parent = gui,
-	})
-
-	refs.ModeButtons = {}
-	local modes = { { "Follow", "1" }, { "Attack", "2" }, { "Defend", "3" } }
-	for i, entry in modes do
-		local mode, key = entry[1], entry[2]
-		refs.ModeButtons[mode] = UIKit.button({
-			Position = UDim2.new((i - 1) / 3, 2, 0, 0),
-			Size = UDim2.new(1 / 3, -4, 0, 34),
-			Text = ("%s [%s]"):format(mode, key),
-			Parent = cluster,
-		}, function()
+	for mode, button in refs.ModeButtons do
+		onClick(button, function()
 			ctx.Net.Get("SetCommand"):FireServer(mode)
 		end)
 	end
-
-	refs.FeedButton = UIKit.button({
-		AnchorPoint = Vector2.new(0, 1),
-		Position = UDim2.new(0, 20, 1, 0),
-		Size = UDim2.fromOffset(92, 92),
-		BackgroundColor3 = Color3.fromRGB(150, 50, 80),
-		Text = "🍓\nFEED [F]",
-		Parent = cluster,
-	}, function()
+	onClick(refs.FeedButton, function()
 		ctx.Net.Get("FeedCreature"):FireServer()
 	end)
-
-	refs.AbilityButton = UIKit.button({
-		AnchorPoint = Vector2.new(1, 1),
-		Position = UDim2.new(1, 0, 1, 0),
-		Size = UDim2.fromOffset(120, 120),
-		BackgroundColor3 = Color3.fromRGB(80, 60, 170),
-		Text = "ABILITY\n[Q]",
-		Parent = cluster,
-	}, function()
+	onClick(refs.AbilityButton, function()
 		ctx.Net.Get("UseAbility"):FireServer()
 	end)
-	refs.AbilityButton:FindFirstChildOfClass("UICorner").CornerRadius = UDim.new(1, 0)
-	refs.AbilityCooldown = UIKit.new("Frame", {
-		Size = UDim2.fromScale(1, 0),
-		AnchorPoint = Vector2.new(0, 1),
-		Position = UDim2.fromScale(0, 1),
-		BackgroundColor3 = Color3.new(0, 0, 0),
-		BackgroundTransparency = 0.45,
-		BorderSizePixel = 0,
-		ZIndex = 2,
-		Parent = refs.AbilityButton,
-	})
-	UIKit.corner(refs.AbilityCooldown, 60)
-end
-
-local function buildMenu(gui: ScreenGui)
-	local bar = UIKit.new("Frame", {
-		Name = "Menu",
-		AnchorPoint = Vector2.new(0.5, 1),
-		Position = UDim2.new(0.5, 0, 1, -10),
-		Size = UDim2.fromOffset(330, 58),
-		BackgroundTransparency = 1,
-		Parent = gui,
-	})
-	UIKit.new("UIListLayout", {
-		FillDirection = Enum.FillDirection.Horizontal,
-		HorizontalAlignment = Enum.HorizontalAlignment.Center,
-		Padding = UDim.new(0, 8),
-		Parent = bar,
-	})
-	local items = { { "Eggs", "🥚 Eggs" }, { "Creatures", "🐲 Creatures" }, { "Shop", "🛒 Shop" } }
-	refs.MenuButtons = {}
-	for _, item in items do
-		refs.MenuButtons[item[1]] = UIKit.button({
-			Size = UDim2.fromOffset(104, 54),
-			BackgroundColor3 = C.Panel,
-			Text = item[2],
-			Parent = bar,
-		}, function()
-			ctx.Panels.Toggle(item[1])
+	for name, button in refs.MenuButtons do
+		onClick(button, function()
+			ctx.Panels.Toggle(name)
 		end)
 	end
-	refs.EggBadge = UIKit.text({
-		AnchorPoint = Vector2.new(1, 0),
-		Position = UDim2.new(1, 6, 0, -6),
-		Size = UDim2.fromOffset(24, 24),
-		BackgroundTransparency = 0,
-		BackgroundColor3 = C.Bad,
-		Font = Enum.Font.FredokaOne,
-		Visible = false,
-		ZIndex = 3,
-		Parent = refs.MenuButtons.Eggs,
-	})
-	UIKit.corner(refs.EggBadge, 12)
 
-	local incubator = UIKit.panel({
-		Name = "Incubator",
-		AnchorPoint = Vector2.new(0.5, 1),
-		Position = UDim2.new(0.5, 0, 1, -76),
-		Size = UDim2.fromOffset(300, 46),
-		Visible = false,
-		Parent = gui,
-	})
-	refs.IncubatorText = UIKit.text({ Position = UDim2.fromOffset(8, 4), Size = UDim2.new(1, -16, 0, 20), Font = Enum.Font.FredokaOne, Parent = incubator })
-	local _, fill = UIKit.bar({ Position = UDim2.new(0, 8, 0, 28), Size = UDim2.new(1, -16, 0, 10), Parent = incubator }, C.Gold)
-	refs.IncubatorFill = fill
-	refs.Incubator = incubator
-end
-
-local function buildMessages(gui: ScreenGui)
-	refs.Toasts = UIKit.new("Frame", {
-		Name = "Toasts",
-		AnchorPoint = Vector2.new(1, 0),
-		Position = UDim2.new(1, -10, 0, 10),
-		Size = UDim2.fromOffset(320, 260),
-		BackgroundTransparency = 1,
-		Parent = gui,
-	})
-	UIKit.new("UIListLayout", { Padding = UDim.new(0, 6), HorizontalAlignment = Enum.HorizontalAlignment.Right, Parent = refs.Toasts })
-
-	refs.Announcement = UIKit.text({
-		Name = "Announcement",
-		AnchorPoint = Vector2.new(0.5, 0),
-		Position = UDim2.new(0.5, 0, 0, 152),
-		Size = UDim2.new(0.8, 0, 0, 40),
-		Font = Enum.Font.FredokaOne,
-		TextStrokeTransparency = 0.1,
-		TextTransparency = 1,
-		Parent = gui,
-	})
-	UIKit.new("UITextSizeConstraint", { MaxTextSize = 38, Parent = refs.Announcement })
-
-	refs.BigTitle = UIKit.text({
-		AnchorPoint = Vector2.new(0.5, 0.5),
-		Position = UDim2.fromScale(0.5, 0.36),
-		Size = UDim2.new(0.8, 0, 0, 90),
-		Font = Enum.Font.FredokaOne,
-		TextStrokeTransparency = 0,
-		TextTransparency = 1,
-		TextStrokeColor3 = Color3.new(0, 0, 0),
-		Parent = gui,
-	})
-	refs.BigSub = UIKit.text({
-		AnchorPoint = Vector2.new(0.5, 0.5),
-		Position = UDim2.new(0.5, 0, 0.36, 62),
-		Size = UDim2.new(0.6, 0, 0, 32),
-		Font = Enum.Font.FredokaOne,
-		TextStrokeTransparency = 0.2,
-		TextTransparency = 1,
-		Parent = gui,
-	})
-
-	local result = UIKit.panel({
-		Name = "NightResult",
-		AnchorPoint = Vector2.new(0.5, 0.5),
-		Position = UDim2.fromScale(0.5, 0.55),
-		Size = UDim2.fromOffset(360, 190),
-		Visible = false,
-		Parent = gui,
-	})
-	UIKit.padding(result, 12)
-	refs.ResultTitle = UIKit.text({ Size = UDim2.new(1, 0, 0, 40), Font = Enum.Font.FredokaOne, Parent = result })
-	refs.ResultBody = UIKit.text({ Position = UDim2.fromOffset(0, 46), Size = UDim2.new(1, 0, 1, -46), TextScaled = false, TextSize = 20, TextYAlignment = Enum.TextYAlignment.Top, Font = Enum.Font.GothamBold, Parent = result })
-	refs.Result = result
-
-	refs.DeathOverlay = UIKit.text({
-		Size = UDim2.fromScale(1, 1),
-		BackgroundColor3 = Color3.fromRGB(80, 0, 0),
-		BackgroundTransparency = 0.55,
-		Text = "💀 YOU FELL\nYou'll return at dawn... if anyone survives.",
-		Font = Enum.Font.FredokaOne,
-		Visible = false,
-		ZIndex = 0,
-		Parent = gui,
-	})
-	UIKit.new("UITextSizeConstraint", { MaxTextSize = 40, Parent = refs.DeathOverlay })
+	-- Start states (exported layouts are saved fully visible so they're easy to edit)
+	refs.BossBar.Visible = false
+	refs.CreatureCard.Visible = false
+	refs.EvolveButton.Visible = false
+	refs.EggBadge.Visible = false
+	refs.Incubator.Visible = false
+	refs.NightResult.Visible = false
+	refs.DeathOverlay.Visible = false
+	for _, name in { "Announcement", "BigTitle", "BigSub" } do
+		refs[name].TextTransparency = 1
+		refs[name].TextStrokeTransparency = 1
+	end
 end
 
 ---------------------------------------------------------------------------------------------------
 -- Public messaging
 ---------------------------------------------------------------------------------------------------
 function Hud.Toast(text: string, color: Color3?)
-	local toast = UIKit.panel({
-		Size = UDim2.fromOffset(320, 38),
-		BackgroundColor3 = C.Bg,
-		Parent = refs.Toasts,
-	})
-	local label = UIKit.text({
-		Position = UDim2.fromOffset(8, 3),
-		Size = UDim2.new(1, -16, 1, -6),
-		Text = text,
-		TextColor3 = color or C.Text,
-		TextXAlignment = Enum.TextXAlignment.Left,
-		Parent = toast,
-	})
-	UIKit.new("UITextSizeConstraint", { MaxTextSize = 18, Parent = label })
-	local toasts = refs.Toasts:GetChildren()
+	local toast, label
+	if toastTemplate then
+		toast = toastTemplate:Clone()
+		toast.Visible = true
+		label = toast:FindFirstChild("Label", true) or toast
+		toast.Parent = refs.Toasts
+	else
+		toast = UIKit.panel({ Size = UDim2.fromOffset(320, 38), BackgroundColor3 = C.Bg, Parent = refs.Toasts })
+		label = UIKit.text({ Position = UDim2.fromOffset(8, 3), Size = UDim2.new(1, -16, 1, -6), TextXAlignment = Enum.TextXAlignment.Left, Parent = toast })
+		UIKit.new("UITextSizeConstraint", { MaxTextSize = 18, Parent = label })
+	end
+	if label:IsA("TextLabel") or label:IsA("TextButton") then
+		label.Text = text
+		if color then
+			label.TextColor3 = color
+		end
+	end
 	local frames = {}
-	for _, child in toasts do
-		if child:IsA("Frame") then
+	for _, child in refs.Toasts:GetChildren() do
+		if child:IsA("GuiObject") then
 			table.insert(frames, child)
 		end
 	end
@@ -353,7 +131,11 @@ function Hud.Toast(text: string, color: Color3?)
 	end
 	task.delay(4.5, function()
 		if toast.Parent then
-			UIKit.tween(label, 0.4, { TextTransparency = 1 })
+			for _, d in toast:GetDescendants() do
+				if d:IsA("TextLabel") or d:IsA("TextButton") then
+					UIKit.tween(d, 0.4, { TextTransparency = 1, TextStrokeTransparency = 1 })
+				end
+			end
 			UIKit.tween(toast, 0.4, { BackgroundTransparency = 1 })
 			task.wait(0.4)
 			toast:Destroy()
@@ -368,7 +150,7 @@ function Hud.Announce(text: string, color: Color3?, big: boolean?)
 	local label = refs.Announcement
 	label.Text = text
 	label.TextColor3 = color or C.Gold
-	label.Size = UDim2.new(0.8, 0, 0, if big then 54 else 38)
+	label.Size = if big then UIKit.scaleUDim2(baseSizes.Announcement, 1.35) else baseSizes.Announcement
 	label.TextTransparency = 0
 	label.TextStrokeTransparency = 0.1
 	if big then
@@ -391,13 +173,13 @@ function Hud.BigTitle(title: string, sub: string, color: Color3)
 	refs.BigSub.Text = sub
 	refs.BigTitle.TextTransparency = 1
 	refs.BigSub.TextTransparency = 1
-	refs.BigTitle.Size = UDim2.new(0.8, 0, 0, 140)
-	UIKit.tween(refs.BigTitle, 0.5, { TextTransparency = 0, Size = UDim2.new(0.8, 0, 0, 90) }, Enum.EasingStyle.Back)
-	UIKit.tween(refs.BigSub, 0.8, { TextTransparency = 0 })
+	refs.BigTitle.Size = UIKit.scaleUDim2(baseSizes.BigTitle, 1.5)
+	UIKit.tween(refs.BigTitle, 0.5, { TextTransparency = 0, TextStrokeTransparency = 0, Size = baseSizes.BigTitle }, Enum.EasingStyle.Back)
+	UIKit.tween(refs.BigSub, 0.8, { TextTransparency = 0, TextStrokeTransparency = 0.2 })
 	task.delay(3, function()
 		if titleToken == token then
-			UIKit.tween(refs.BigTitle, 0.7, { TextTransparency = 1 })
-			UIKit.tween(refs.BigSub, 0.7, { TextTransparency = 1 })
+			UIKit.tween(refs.BigTitle, 0.7, { TextTransparency = 1, TextStrokeTransparency = 1 })
+			UIKit.tween(refs.BigSub, 0.7, { TextTransparency = 1, TextStrokeTransparency = 1 })
 		end
 	end)
 end
@@ -427,17 +209,17 @@ function Hud.ShowNightResult(result)
 		table.insert(lines, "Stay close to your creature and feed it when it's hurt.")
 	end
 	refs.ResultBody.Text = table.concat(lines, "\n")
-	refs.Result.Visible = true
-	refs.Result.Size = UDim2.fromOffset(300, 150)
-	UIKit.tween(refs.Result, 0.35, { Size = UDim2.fromOffset(360, 190) }, Enum.EasingStyle.Back)
+	refs.NightResult.Visible = true
+	refs.NightResult.Size = UIKit.scaleUDim2(baseSizes.NightResult, 0.8)
+	UIKit.tween(refs.NightResult, 0.35, { Size = baseSizes.NightResult }, Enum.EasingStyle.Back)
 	task.delay(5, function()
-		refs.Result.Visible = false
+		refs.NightResult.Visible = false
 	end)
 end
 
 function Hud.SetBoss(data)
 	bossState = data
-	refs.BossFrame.Visible = data ~= nil
+	refs.BossBar.Visible = data ~= nil
 	if data then
 		refs.BossName.Text = data.Name .. (if data.Enraged then "  🔥 ENRAGED" else "") .. (if data.Exposed then "  💥 CORE EXPOSED" else "")
 		refs.BossFill.BackgroundColor3 = if data.Exposed then Color3.fromRGB(255, 220, 60) else Color3.fromRGB(220, 50, 50)
@@ -548,7 +330,8 @@ local function refreshCreatureAttributes()
 	refs.CreatureHPText.Text = if ko then "KNOCKED OUT" else ("%d / %d"):format(hp, maxHp)
 	local mode = player:GetAttribute("CreatureMode") or "Attack"
 	for name, button in refs.ModeButtons do
-		button.BackgroundColor3 = if name == mode then Color3.fromRGB(70, 140, 255) else C.PanelLight
+		local selected = button:GetAttribute("SelectedColor") or Color3.fromRGB(70, 140, 255)
+		button.BackgroundColor3 = if name == mode then selected else modeColors[button]
 	end
 	if ctx.Profile then
 		refs.Objective.Text = objectiveText(ctx.Profile)
@@ -567,7 +350,9 @@ local function refreshPhase()
 	if modifier == "BloodMoon" or modifier == "Nightmare" or modifier == "Apocalypse" then
 		top = Color3.fromRGB(110, 20, 20)
 	end
-	refs.BannerGradient.Color = ColorSequence.new(top, C.Panel)
+	if refs.BannerGradient then
+		refs.BannerGradient.Color = ColorSequence.new(top, C.Panel)
+	end
 
 	local key = phase .. night
 	if key ~= lastPhaseKey then
@@ -626,15 +411,7 @@ end
 
 function Hud.Init(context)
 	ctx = context
-	local gui = ctx.Gui
-	buildPhaseBanner(gui)
-	buildBossBar(gui)
-	buildCurrencies(gui)
-	buildCreatureCard(gui)
-	buildActions(gui)
-	buildMenu(gui)
-	buildMessages(gui)
-	refs.CreatureCard.Visible = false
+	bind(ctx.Gui)
 
 	for _, attr in { "Phase", "Night", "Modifier" } do
 		ctx.Root:GetAttributeChangedSignal(attr):Connect(refreshPhase)

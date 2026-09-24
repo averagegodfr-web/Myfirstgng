@@ -669,6 +669,9 @@ Instance.new("StarterPlayerScripts", StarterPlayer).Name = "StarterPlayerScripts
 service("Lighting").ClockTime = 14
 service("SoundService")
 service("TextChatService")
+service("StarterGui")
+service("Selection")
+function methods:Set() end
 local RunService = service("RunService")
 rawget(RunService, "__signals").Heartbeat = heartbeatSignal
 rawget(RunService, "__signals").RenderStepped = heartbeatSignal
@@ -786,6 +789,12 @@ function M.loadCharacter(player)
 	local humanoid = Instance.new("Humanoid")
 	humanoid.Parent = character
 	character.PrimaryPart = root
+	-- Roblox copies StarterGui into PlayerGui on spawn (ResetOnSpawn=false guis only once).
+	for _, g in services.StarterGui:GetChildren() do
+		if not player.PlayerGui:FindFirstChild(g.Name) then
+			g:Clone().Parent = player.PlayerGui
+		end
+	end
 	character.Parent = workspace
 	player.Character = character
 	-- StarterPack tools
